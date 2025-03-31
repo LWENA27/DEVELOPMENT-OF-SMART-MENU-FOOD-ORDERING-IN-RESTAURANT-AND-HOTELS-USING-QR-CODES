@@ -1,7 +1,6 @@
 <?php
 session_start();
 require 'src/includes/db.php';
-// require 'src/includes/header.php';
 
 ?>
 
@@ -20,7 +19,7 @@ require 'src/includes/db.php';
             <ul>
                 <li><a href="src/customer/index.php">Home</a></li>
                 <li><a href="src/customer/menu.php">Menu</a></li>
-                <li><a href="src/admin/login.php">Admin Login</a></li>
+                <li></li>
             </ul>
         </nav>
     </header>
@@ -28,6 +27,6 @@ require 'src/includes/db.php';
         <h2>Explore Our Smart Menu</h2>
         <p>Scan the QR codes at your table to view the menu and place your orders directly from your smartphone!</p>
     </main>
-    <?php //require 'src/includes/footer.php'; ?>
+    <?php require 'src/includes/footer.php'; ?>
 </body>
 </html>

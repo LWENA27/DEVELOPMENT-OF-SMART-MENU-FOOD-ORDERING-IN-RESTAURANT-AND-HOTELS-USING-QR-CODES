@@ -1,5 +1,9 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Your authentication-related code here
 include '../includes/db.php';
 include '../includes/auth.php';
 

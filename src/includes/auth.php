@@ -1,13 +1,21 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Authentication-related functions
+
+function isAdminLoggedIn() {
+    return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
+}
 
 function login($username, $password) {
-    // Assuming you have a function to get user data from the database
     $user = getUserByUsername($username);
-    
+
     if ($user && password_verify($password, $user['password'])) {
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['username'] = $user['username'];
+        $_SESSION['admin_logged_in'] = true; // Set admin login session
         return true;
     }
     return false;
@@ -24,13 +32,14 @@ function isLoggedIn() {
 
 function requireLogin() {
     if (!isLoggedIn()) {
-        header("Location: /qr-smart-menu-system/src/admin/login.php");
+        header("Location: ../admin/login.php");
         exit();
     }
 }
 
 function getUserByUsername($username) {
     include 'db.php'; // Include database connection
+    global $pdo; // Ensure $pdo is accessible
     $stmt = $pdo->prepare("SELECT * FROM users WHERE username = :username");
     $stmt->execute(['username' => $username]);
     return $stmt->fetch(PDO::FETCH_ASSOC);
