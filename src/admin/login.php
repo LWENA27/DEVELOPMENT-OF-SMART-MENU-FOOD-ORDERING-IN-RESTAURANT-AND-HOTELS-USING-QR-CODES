@@ -3,6 +3,15 @@ session_start();
 include '../includes/db.php';
 include '../includes/auth.php';
 
+function authenticateUser($username, $password) {
+    global $db; // Assuming $db is defined in db.php
+    $stmt = $db->prepare("SELECT * FROM admins WHERE username = ? AND password = ?");
+    $stmt->bind_param("ss", $username, $password);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->num_rows > 0;
+}
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = $_POST['username'];
     $password = $_POST['password'];

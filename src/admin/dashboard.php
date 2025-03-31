@@ -4,16 +4,36 @@ include '../includes/db.php';
 include '../includes/auth.php';
 
 // Check if the user is logged in
-if (!isAdminLoggedIn()) {
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit();
 }
 
 // Fetch key metrics for the dashboard
-$totalOrders = getTotalOrders(); // Function to get total orders from the database
-$totalMenuItems = getTotalMenuItems(); // Function to get total menu items from the database
-$totalCustomers = getTotalCustomers(); // Function to get total customers from the database
+$totalOrders = getTotalOrders($conn); // Function to get total orders from the database
 
+function getTotalOrders($conn) {
+    $query = "SELECT COUNT(*) AS total FROM orders";
+    $result = mysqli_query($conn, $query);
+    $row = mysqli_fetch_assoc($result);
+    return $row['total'];
+}
+$totalMenuItems = getTotalMenuItems($conn); // Function to get total menu items from the database
+$totalCustomers = getTotalCustomers($conn); // Function to get total customers from the database
+
+function getTotalMenuItems($conn) {
+    $query = "SELECT COUNT(*) AS total FROM menu_items";
+    $result = mysqli_query($conn, $query);
+    $row = mysqli_fetch_assoc($result);
+    return $row['total'];
+}
+
+function getTotalCustomers($conn) {
+    $query = "SELECT COUNT(*) AS total FROM customers";
+    $result = mysqli_query($conn, $query);
+    $row = mysqli_fetch_assoc($result);
+    return $row['total'];
+}
 ?>
 
 <!DOCTYPE html>

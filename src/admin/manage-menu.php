@@ -9,6 +9,11 @@ if (!isAdminLoggedIn()) {
     exit();
 }
 
+// Ensure the database connection is established
+if (!$conn) {
+    die("Database connection failed: " . mysqli_connect_error());
+}
+
 // Handle form submissions for adding, editing, and deleting menu items
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['add_item'])) {

@@ -4,7 +4,7 @@ include '../includes/db.php';
 include '../includes/auth.php';
 
 // Check if the user is logged in
-if (!isAdminLoggedIn()) {
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit();
 }

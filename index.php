@@ -28,6 +28,6 @@ require 'src/includes/header.php';
         <h2>Explore Our Smart Menu</h2>
         <p>Scan the QR codes at your table to view the menu and place your orders directly from your smartphone!</p>
     </main>
-    <?php require 'src/includes/footer.php'; ?>
+    <?php //require 'src/includes/footer.php'; ?>
 </body>
 </html>
