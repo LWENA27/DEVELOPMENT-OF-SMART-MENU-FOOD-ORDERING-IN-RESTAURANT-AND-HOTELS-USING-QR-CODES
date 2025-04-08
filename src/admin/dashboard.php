@@ -13,7 +13,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit();
 }
 
-// Fetch key metrics for the dashboard
+
+
+//  Fetch key metrics for the dashboard
 $totalOrders = getTotalOrders($conn); // Function to get total orders from the database
 
 function getTotalOrders($conn) {
