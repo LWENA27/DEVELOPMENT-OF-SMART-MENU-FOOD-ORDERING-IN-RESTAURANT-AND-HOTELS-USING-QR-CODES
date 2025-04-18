@@ -17,8 +17,14 @@ $menu_item_id = $_GET['id'] ?? 0;
 $errors = [];
 $success = '';
 
+// Open database connection once for all operations
+$db = getDb();
+if (!$db) {
+    $errors[] = 'Database connection failed.';
+}
+
 // Handle form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($errors)) {
     $name = trim($_POST['name'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $price = floatval($_POST['price'] ?? 0);
@@ -33,65 +39,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($stock < 0) $errors[] = 'Stock cannot be negative.';
 
     if (empty($errors)) {
-        $db = getDb();
-        if (!$db) {
-            $errors[] = 'Database connection failed.';
+        if ($action === 'edit' && $menu_item_id > 0) {
+            // Update existing menu item
+            $stmt = $db->prepare("UPDATE menu_items SET name = ?, description = ?, price = ?, category_id = ?, stock = ?, is_available = ? WHERE id = ?");
+            if ($stmt) {
+                $stmt->bind_param("ssdiiii", $name, $description, $price, $category_id, $stock, $is_available, $menu_item_id);
+                if ($stmt->execute()) {
+                    $success = 'Menu item updated successfully.';
+                } else {
+                    $errors[] = 'Failed to update menu item: ' . $stmt->error;
+                }
+                $stmt->close();
+            } else {
+                $errors[] = 'Error preparing update statement: ' . $db->error;
+            }
         } else {
-            if ($action === 'edit' && $menu_item_id > 0) {
-                // Update existing menu item
-                $stmt = $db->prepare("UPDATE menu_items SET name = ?, description = ?, price = ?, category_id = ?, stock = ?, is_available = ? WHERE id = ?");
-                if ($stmt) {
-                    $stmt->bind_param("ssdiiii", $name, $description, $price, $category_id, $stock, $is_available, $menu_item_id);
-                    $stmt->execute();
-                    $stmt->close();
+            // Add new menu item
+            $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category_id, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
+            if ($stmt) {
+                $stmt->bind_param("ssdiii", $name, $description, $price, $category_id, $stock, $is_available);
+                if ($stmt->execute()) {
+                    $success = 'Menu item added successfully.';
                 } else {
-                    die("Error preparing update statement: " . $db->error);
+                    $errors[] = 'Failed to add menu item: ' . $stmt->error;
                 }
+                $stmt->close();
             } else {
-                // Add new menu item
-                $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category_id, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
-                if ($stmt) {
-                    $stmt->bind_param("ssdiii", $name, $description, $price, $category_id, $stock, $is_available);
-                    $stmt->execute();
-                    $stmt->close();
-                } else {
-                    die("Error preparing insert statement: " . $db->error);
-                }
+                $errors[] = 'Error preparing insert statement: ' . $db->error;
             }
-            
-
-            if ($stmt->execute()) {
-                $success = $action === 'edit' ? 'Menu item updated successfully.' : 'Menu item added successfully.';
-            } else {
-                $errors[] = 'Failed to save menu item: ' . $db->error;
-            }
-            $stmt->close();
         }
     }
 }
 
 // Handle delete action
-if ($action === 'delete' && $menu_item_id > 0) {
-    $db = getDb();
-    if ($db) {
-        $stmt = $db->prepare("DELETE FROM menu_items WHERE id = ?");
+if ($action === 'delete' && $menu_item_id > 0 && empty($errors)) {
+    $stmt = $db->prepare("DELETE FROM menu_items WHERE id = ?");
+    if ($stmt) {
         $stmt->bind_param("i", $menu_item_id);
         if ($stmt->execute()) {
             $success = 'Menu item deleted successfully.';
         } else {
-            $errors[] = 'Failed to delete menu item: ' . $db->error;
+            $errors[] = 'Failed to delete menu item: ' . $stmt->error;
         }
         $stmt->close();
     } else {
-        $errors[] = 'Database connection failed.';
+        $errors[] = 'Error preparing delete statement: ' . $db->error;
     }
 }
 
 // Handle copy action
-if ($action === 'copy' && $menu_item_id > 0) {
-    $db = getDb();
-    if ($db) {
-        $stmt = $db->prepare("SELECT name, description, price, category_id, stock, is_available FROM menu_items WHERE id = ?");
+if ($action === 'copy' && $menu_item_id > 0 && empty($errors)) {
+    $stmt = $db->prepare("SELECT name, description, price, category_id, stock, is_available FROM menu_items WHERE id = ?");
+    if ($stmt) {
         $stmt->bind_param("i", $menu_item_id);
         $stmt->execute();
         $item = $stmt->get_result()->fetch_assoc();
@@ -99,38 +98,40 @@ if ($action === 'copy' && $menu_item_id > 0) {
 
         if ($item) {
             $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category_id, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssdiii", $item['name'], $item['description'], $item['price'], $item['category_id'], $item['stock'], $item['is_available']);
-            if ($stmt->execute()) {
-                $success = 'Menu item copied successfully.';
+            if ($stmt) {
+                $stmt->bind_param("ssdiii", $item['name'], $item['description'], $item['price'], $item['category_id'], $item['stock'], $item['is_available']);
+                if ($stmt->execute()) {
+                    $success = 'Menu item copied successfully.';
+                } else {
+                    $errors[] = 'Failed to copy menu item: ' . $stmt->error;
+                }
+                $stmt->close();
             } else {
-                $errors[] = 'Failed to copy menu item: ' . $db->error;
+                $errors[] = 'Error preparing copy statement: ' . $db->error;
             }
-            $stmt->close();
         }
     } else {
-        $errors[] = 'Database connection failed.';
+        $errors[] = 'Error preparing select statement: ' . $db->error;
     }
 }
 
 // Fetch menu item for editing
 $menu_item = null;
-if ($action === 'edit' && $menu_item_id > 0) {
-    $db = getDb();
-    if ($db) {
-        $stmt = $db->prepare("SELECT * FROM menu_items WHERE id = ?");
+if ($action === 'edit' && $menu_item_id > 0 && empty($errors)) {
+    $stmt = $db->prepare("SELECT * FROM menu_items WHERE id = ?");
+    if ($stmt) {
         $stmt->bind_param("i", $menu_item_id);
         $stmt->execute();
         $menu_item = $stmt->get_result()->fetch_assoc();
         $stmt->close();
+    } else {
+        $errors[] = 'Error preparing select statement for edit: ' . $db->error;
     }
 }
 
 // Fetch all menu items
 $menu_items = [];
-if (!isset($db) || !$db) {
-    $db = getDb();
-}
-if ($db) {
+if (empty($errors)) {
     $result = $db->query("SELECT * FROM menu_items ORDER BY category_id, name");
     if ($result) {
         while ($row = $result->fetch_assoc()) {
@@ -141,8 +142,8 @@ if ($db) {
     }
 }
 
-// Close database connection at the end of all operations
-if (isset($db) && $db) {
+// Close the database connection after all operations
+if ($db) {
     $db->close();
 }
 
