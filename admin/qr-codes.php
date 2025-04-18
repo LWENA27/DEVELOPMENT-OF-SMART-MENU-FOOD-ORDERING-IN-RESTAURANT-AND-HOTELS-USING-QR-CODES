@@ -14,9 +14,6 @@ $db = getDb();
 $message = '';
 $error = '';
 
-// Include phpqrcode library
-require_once '../includes/phpqrcode/qrlib.php';
-
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['generate_qr'])) {
@@ -38,6 +35,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $sql .= implode(' OR ', $whereConditions);
             $stmt = $db->prepare($sql);
+            
+            if (!$stmt) {
+                throw new Exception("Error preparing query: " . $db->error);
+            }
             
             if (!empty($params)) {
                 $stmt->bind_param($types, ...$params);
@@ -62,16 +63,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Generate QR code content (URL to the menu with table ID)
                 $qrContent = SITE_URL . 'index.php?table=' . $tableId;
                 
-                // Generate QR code
-                QRcode::png($qrContent, $qrPath, QR_ECLEVEL_H, 10);
+                // Use goqr.me API to generate QR code
+                $apiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($qrContent);
+                $qrImage = file_get_contents($apiUrl);
+                
+                if ($qrImage === false) {
+                    throw new Exception("Failed to fetch QR code from API for table $tableNumber.");
+                }
+                
+                // Save the QR code image
+                file_put_contents($qrPath, $qrImage);
                 
                 // Update table record with QR code URL
                 $updateStmt = $db->prepare("UPDATE tables SET qr_code = ? WHERE id = ?");
+                if (!$updateStmt) {
+                    throw new Exception("Error preparing update query: " . $db->error);
+                }
                 $updateStmt->bind_param("si", $qrFilename, $tableId);
                 $updateStmt->execute();
+                $updateStmt->close();
                 
                 $count++;
             }
+            
+            $stmt->close();
             
             if ($count > 0) {
                 $message = "Successfully generated $count QR code(s).";
@@ -92,33 +107,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // Check if table number already exists
             $stmt = $db->prepare("SELECT id FROM tables WHERE table_number = ?");
-            $stmt->bind_param("s", $tableNumber);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            if ($result->num_rows > 0) {
-                $error = "Table/Room number '$tableNumber' already exists.";
+            if (!$stmt) {
+                $error = "Error preparing query: " . $db->error;
             } else {
-                $stmt = $db->prepare("INSERT INTO tables (table_number, is_room, location, qr_code) VALUES (?, ?, ?, '')");
-                $stmt->bind_param("sis", $tableNumber, $isRoom, $location);
+                $stmt->bind_param("s", $tableNumber);
+                $stmt->execute();
+                $result = $stmt->get_result();
                 
-                if ($stmt->execute()) {
-                    $message = ($isRoom ? "Room" : "Table") . " '$tableNumber' added successfully.";
+                if ($result->num_rows > 0) {
+                    $error = "Table/Room number '$tableNumber' already exists.";
                 } else {
-                    $error = "Error adding " . ($isRoom ? "room" : "table") . ": " . $db->getError();
+                    $stmt->close();
+                    $stmt = $db->prepare("INSERT INTO tables (table_number, is_room, location, qr_code) VALUES (?, ?, ?, '')");
+                    if (!$stmt) {
+                        $error = "Error preparing insert query: " . $db->error;
+                    } else {
+                        $stmt->bind_param("sis", $tableNumber, $isRoom, $location);
+                        
+                        if ($stmt->execute()) {
+                            $message = ($isRoom ? "Room" : "Table") . " '$tableNumber' added successfully.";
+                        } else {
+                            $error = "Error adding " . ($isRoom ? "room" : "table") . ": " . $db->error;
+                        }
+                    }
                 }
+                $stmt->close();
             }
         }
     } elseif (isset($_POST['delete_table'])) {
         // Delete table/room
         $tableId = $_POST['table_id'];
         
-        $stmt = $db->prepare("DELETE FROM tables WHERE id = ?");
-        $stmt->bind_param("i", $tableId);
-        
-        if ($stmt->execute()) {
-            // Delete associated QR code file if exists
-            $qrQuery = $db->prepare("SELECT qr_code FROM tables WHERE id = ?");
+        // First, fetch the QR code filename to delete the file
+        $qrQuery = $db->prepare("SELECT qr_code FROM tables WHERE id = ?");
+        if (!$qrQuery) {
+            $error = "Error preparing QR query: " . $db->error;
+        } else {
             $qrQuery->bind_param("i", $tableId);
             $qrQuery->execute();
             $qrResult = $qrQuery->get_result();
@@ -129,10 +153,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     unlink($qrFile);
                 }
             }
+            $qrQuery->close();
             
-            $message = "Table/Room deleted successfully.";
-        } else {
-            $error = "Error deleting table/room: " . $db->getError();
+            // Now delete the table
+            $stmt = $db->prepare("DELETE FROM tables WHERE id = ?");
+            if (!$stmt) {
+                $error = "Error preparing delete query: " . $db->error;
+            } else {
+                $stmt->bind_param("i", $tableId);
+                
+                if ($stmt->execute()) {
+                    $message = "Table/Room deleted successfully.";
+                } else {
+                    $error = "Error deleting table/room: " . $db->error;
+                }
+                $stmt->close();
+            }
         }
     }
 }
@@ -140,8 +176,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Get all tables
 $tables = [];
 $result = $db->query("SELECT id, table_number, is_room, location, qr_code FROM tables ORDER BY is_room, table_number");
-while ($row = $result->fetch_assoc()) {
-    $tables[] = $row;
+if ($result) {
+    while ($row = $result->fetch_assoc()) {
+        $tables[] = $row;
+    }
+} else {
+    $error = "Error fetching tables: " . $db->error;
+}
+
+// Close the database connection
+if ($db) {
+    $db->close();
 }
 ?>
 
@@ -164,20 +209,20 @@ while ($row = $result->fetch_assoc()) {
             <div class="header">
                 <h1>QR Code Management</h1>
                 <div class="user-info">
-                    <span>Welcome, <?php echo $_SESSION['user_name']; ?></span>
+                    <span>Welcome, <?php echo isset($_SESSION['user_name']) ? htmlspecialchars($_SESSION['user_name']) : 'Admin'; ?></span>
                     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </div>
             </div>
             
             <?php if (!empty($message)): ?>
             <div class="alert alert-success">
-                <?php echo $message; ?>
+                <?php echo htmlspecialchars($message); ?>
             </div>
             <?php endif; ?>
             
             <?php if (!empty($error)): ?>
             <div class="alert alert-error">
-                <?php echo $error; ?>
+                <?php echo htmlspecialchars($error); ?>
             </div>
             <?php endif; ?>
             
@@ -242,14 +287,14 @@ while ($row = $result->fetch_assoc()) {
                                     <?php else: ?>
                                         <?php foreach ($tables as $table): ?>
                                         <tr>
-                                            <td><input type="checkbox" name="tables[]" value="<?php echo $table['id']; ?>" class="table-checkbox"></td>
-                                            <td><?php echo $table['table_number']; ?></td>
+                                            <td><input type="checkbox" name="tables[]" value="<?php echo htmlspecialchars($table['id']); ?>" class="table-checkbox"></td>
+                                            <td><?php echo htmlspecialchars($table['table_number']); ?></td>
                                             <td><?php echo $table['is_room'] ? 'Room' : 'Table'; ?></td>
-                                            <td><?php echo $table['location']; ?></td>
+                                            <td><?php echo htmlspecialchars($table['location']); ?></td>
                                             <td>
                                                 <?php if (!empty($table['qr_code'])): ?>
-                                                <a href="<?php echo QR_CODE_URL . $table['qr_code']; ?>" target="_blank" class="qr-preview">
-                                                    <img src="<?php echo QR_CODE_URL . $table['qr_code']; ?>" alt="QR Code" width="50">
+                                                <a href="<?php echo htmlspecialchars(QR_CODE_URL . $table['qr_code']); ?>" target="_blank" class="qr-preview">
+                                                    <img src="<?php echo htmlspecialchars(QR_CODE_URL . $table['qr_code']); ?>" alt="QR Code" width="50">
                                                     <span>View</span>
                                                 </a>
                                                 <?php else: ?>
@@ -259,7 +304,7 @@ while ($row = $result->fetch_assoc()) {
                                             <td>
                                                 <div class="table-actions">
                                                     <form method="post" action="qr-codes.php" class="delete-form">
-                                                        <input type="hidden" name="table_id" value="<?php echo $table['id']; ?>">
+                                                        <input type="hidden" name="table_id" value="<?php echo htmlspecialchars($table['id']); ?>">
                                                         <button type="submit" name="delete_table" class="btn btn-danger btn-sm" 
                                                                 onclick="return confirm('Are you sure you want to delete this <?php echo $table['is_room'] ? 'room' : 'table'; ?>?')">
                                                             <i class="fas fa-trash"></i>
