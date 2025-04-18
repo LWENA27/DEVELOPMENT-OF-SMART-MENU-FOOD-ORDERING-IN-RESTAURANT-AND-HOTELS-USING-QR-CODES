@@ -3,7 +3,7 @@
 $configPath = __DIR__ . '/../../includes/config.php';
 if (!file_exists($configPath)) {
     error_log("Config file not found at: $configPath");
-    echo '<div class="error">Error: Configuration file not found. Please ensure includes/config.php exists.</div>';
+    echo '<div class="error">Error: Configuration file not found at includes/config.php.</div>';
     exit;
 }
 require_once $configPath;

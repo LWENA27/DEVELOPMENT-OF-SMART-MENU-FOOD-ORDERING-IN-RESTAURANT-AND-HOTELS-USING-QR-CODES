@@ -1,10 +1,11 @@
-smart-menu/
+smart_menu_qr/
 ├── admin/
 │   ├── includes/
 │   │   └── sidebar.php
 │   ├── index.php
 │   ├── login.php
-│   └── logout.php
+│   ├── logout.php
+│   └── menu.php (new)
 ├── includes/
 │   ├── config.php
 │   ├── db.php
@@ -15,4 +16,5 @@ smart-menu/
 │   └── js/
 │       └── admin.js
 ├── qr-gen/
+│   └── codes/
 └── index.php
