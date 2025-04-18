@@ -22,14 +22,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $name = trim($_POST['name'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $price = floatval($_POST['price'] ?? 0);
-    $category = trim($_POST['category'] ?? '');
+    $category_id = intval($_POST['category_id'] ?? 0);
     $stock = intval($_POST['stock'] ?? 0);
     $is_available = isset($_POST['is_available']) ? 1 : 0;
 
     // Validate inputs
     if (empty($name)) $errors[] = 'Name is required.';
     if ($price <= 0) $errors[] = 'Price must be greater than 0.';
-    if (empty($category)) $errors[] = 'Category is required.';
+    if ($category_id <= 0) $errors[] = 'Category is required.';
     if ($stock < 0) $errors[] = 'Stock cannot be negative.';
 
     if (empty($errors)) {
@@ -38,22 +38,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Database connection failed.';
         } else {
             if ($action === 'edit' && $menu_item_id > 0) {
-                // Update menu item
-                $stmt = $db->prepare("UPDATE menu_items SET name = ?, description = ?, price = ?, category = ?, stock = ?, is_available = ? WHERE id = ?");
-                $stmt->bind_param("ssdsiis", $name, $description, $price, $category, $stock, $is_available, $menu_item_id);
+                // Update existing menu item
+                $stmt = $db->prepare("UPDATE menu_items SET name = ?, description = ?, price = ?, category_id = ?, stock = ?, is_available = ? WHERE id = ?");
+                if ($stmt) {
+                    $stmt->bind_param("ssdiiii", $name, $description, $price, $category_id, $stock, $is_available, $menu_item_id);
+                    $stmt->execute();
+                    $stmt->close();
+                } else {
+                    die("Error preparing update statement: " . $db->error);
+                }
             } else {
                 // Add new menu item
-                $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("ssdsiis", $name, $description, $price, $category, $stock, $is_available);
+                $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category_id, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
+                if ($stmt) {
+                    $stmt->bind_param("ssdiii", $name, $description, $price, $category_id, $stock, $is_available);
+                    $stmt->execute();
+                    $stmt->close();
+                } else {
+                    die("Error preparing insert statement: " . $db->error);
+                }
             }
+            
 
             if ($stmt->execute()) {
                 $success = $action === 'edit' ? 'Menu item updated successfully.' : 'Menu item added successfully.';
             } else {
-                $errors[] = 'Failed to save menu item.';
+                $errors[] = 'Failed to save menu item: ' . $db->error;
             }
             $stmt->close();
-            $db->close();
         }
     }
 }
@@ -67,10 +79,9 @@ if ($action === 'delete' && $menu_item_id > 0) {
         if ($stmt->execute()) {
             $success = 'Menu item deleted successfully.';
         } else {
-            $errors[] = 'Failed to delete menu item.';
+            $errors[] = 'Failed to delete menu item: ' . $db->error;
         }
         $stmt->close();
-        $db->close();
     } else {
         $errors[] = 'Database connection failed.';
     }
@@ -80,23 +91,22 @@ if ($action === 'delete' && $menu_item_id > 0) {
 if ($action === 'copy' && $menu_item_id > 0) {
     $db = getDb();
     if ($db) {
-        $stmt = $db->prepare("SELECT name, description, price, category, stock, is_available FROM menu_items WHERE id = ?");
+        $stmt = $db->prepare("SELECT name, description, price, category_id, stock, is_available FROM menu_items WHERE id = ?");
         $stmt->bind_param("i", $menu_item_id);
         $stmt->execute();
         $item = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
         if ($item) {
-            $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("ssdsiis", $item['name'], $item['description'], $item['price'], $item['category'], $item['stock'], $item['is_available']);
+            $stmt = $db->prepare("INSERT INTO menu_items (name, description, price, category_id, stock, is_available) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("ssdiii", $item['name'], $item['description'], $item['price'], $item['category_id'], $item['stock'], $item['is_available']);
             if ($stmt->execute()) {
                 $success = 'Menu item copied successfully.';
             } else {
-                $errors[] = 'Failed to copy menu item.';
+                $errors[] = 'Failed to copy menu item: ' . $db->error;
             }
             $stmt->close();
         }
-        $db->close();
     } else {
         $errors[] = 'Database connection failed.';
     }
@@ -112,20 +122,37 @@ if ($action === 'edit' && $menu_item_id > 0) {
         $stmt->execute();
         $menu_item = $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        $db->close();
     }
 }
 
 // Fetch all menu items
-$db = getDb();
 $menu_items = [];
+if (!isset($db) || !$db) {
+    $db = getDb();
+}
 if ($db) {
     $result = $db->query("SELECT * FROM menu_items ORDER BY category_id, name");
-    while ($row = $result->fetch_assoc()) {
-        $menu_items[] = $row;
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $menu_items[] = $row;
+        }
+    } else {
+        $errors[] = 'Failed to fetch menu items: ' . $db->error;
     }
+}
+
+// Close database connection at the end of all operations
+if (isset($db) && $db) {
     $db->close();
 }
+
+// Define category mapping for display
+$category_names = [
+    1 => 'Main Dishes',
+    2 => 'Sides',
+    3 => 'Drinks',
+    4 => 'Desserts'
+];
 ?>
 
 <!DOCTYPE html>
@@ -136,6 +163,106 @@ if ($db) {
     <title>Manage Menu - <?php echo defined('SITE_NAME') ? htmlspecialchars(SITE_NAME) : 'Smart Menu'; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <style>
+        /* Form layout improvements */
+        .form-group {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dashboard-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .dashboard-card form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 0;
+            max-width: 100%;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 14px;
+            margin-right: 5px;
+        }
+
+        .btn-secondary {
+            background-color: var(--error-color);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #ff6b81;
+        }
+
+        /* Fix mobile layout */
+        @media (max-width: 768px) {
+            .dashboard-card form {
+                grid-template-columns: 1fr;
+            }
+
+            .data-table {
+                overflow-x: auto;
+                display: block;
+            }
+        }
+
+        /* Improve error and success messages */
+        .error-container, .success-message {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .error-container {
+            background-color: rgba(255, 71, 87, 0.1);
+            border: 1px solid var(--error-color);
+        }
+
+        .success-message {
+            background-color: rgba(46, 213, 115, 0.1);
+            border: 1px solid var(--success-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .error-message {
+            color: var(--error-color);
+            margin: 5px 0;
+        }
+
+        /* Form field styling */
+        textarea {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px 12px;
+            width: 100%;
+            font-family: inherit;
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        /* Checkbox styling */
+        input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+        }
+    </style>
 </head>
 <body>
     <div class="admin-container">
@@ -191,22 +318,22 @@ if ($db) {
                         <input type="number" id="price" name="price" step="0.01" value="<?php echo $menu_item ? htmlspecialchars($menu_item['price']) : ''; ?>" required>
                     </div>
                     <div class="form-group">
-                        <label for="category">Category</label>
-                        <select id="category" name="category" required>
+                        <label for="category_id">Category</label>
+                        <select id="category_id" name="category_id" required>
                             <option value="">Select Category</option>
-                            <option value="Main Dishes" <?php echo $menu_item && $menu_item['category'] === 'Main Dishes' ? 'selected' : ''; ?>>Main Dishes</option>
-                            <option value="Sides" <?php echo $menu_item && $menu_item['category'] === 'Sides' ? 'selected' : ''; ?>>Sides</option>
-                            <option value="Drinks" <?php echo $menu_item && $menu_item['category'] === 'Drinks' ? 'selected' : ''; ?>>Drinks</option>
-                            <option value="Desserts" <?php echo $menu_item && $menu_item['category'] === 'Desserts' ? 'selected' : ''; ?>>Desserts</option>
+                            <option value="1" <?php echo $menu_item && $menu_item['category_id'] == 1 ? 'selected' : ''; ?>>Main Dishes</option>
+                            <option value="2" <?php echo $menu_item && $menu_item['category_id'] == 2 ? 'selected' : ''; ?>>Sides</option>
+                            <option value="3" <?php echo $menu_item && $menu_item['category_id'] == 3 ? 'selected' : ''; ?>>Drinks</option>
+                            <option value="4" <?php echo $menu_item && $menu_item['category_id'] == 4 ? 'selected' : ''; ?>>Desserts</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="stock">Stock</label>
-                        <input type="number" id="stock" name="stock" value="<?php echo $menu_item ? htmlspecialchars($menu_item['stock']) : '0'; ?>" required>
+                        <input type="number" id="stock" name="stock" value="<?php echo $menu_item && isset($menu_item['stock']) ? htmlspecialchars($menu_item['stock']) : '0'; ?>" required>
                     </div>
                     <div class="form-group">
                         <label>
-                            <input type="checkbox" name="is_available" <?php echo $menu_item && $menu_item['is_available'] ? 'checked' : ''; ?>>
+                            <input type="checkbox" name="is_available" <?php echo $menu_item && isset($menu_item['is_available']) && $menu_item['is_available'] ? 'checked' : ''; ?>>
                             Available
                         </label>
                     </div>
@@ -246,13 +373,13 @@ if ($db) {
                                     <td><input type="checkbox" name="item_ids[]" value="<?php echo $item['id']; ?>"></td>
                                     <td><?php echo htmlspecialchars($item['id']); ?></td>
                                     <td><?php echo htmlspecialchars($item['name']); ?></td>
-                                    <td><?php echo htmlspecialchars($item['description'] ?: 'N/A'); ?></td>
+                                    <td><?php echo htmlspecialchars($item['description'] ?? 'N/A'); ?></td>
                                     <td><?php echo number_format($item['price'], 2); ?></td>
-                                    <td><?php echo htmlspecialchars($item['category_id'] ?? 'N/A'); ?></td>
+                                    <td><?php echo htmlspecialchars($category_names[$item['category_id']] ?? 'Unknown'); ?></td>
                                     <td><?php echo isset($item['stock']) ? htmlspecialchars($item['stock']) : '0'; ?></td>
                                     <td><?php echo isset($item['is_available']) && $item['is_available'] ? 'Yes' : 'No'; ?></td>
-                                    <td><?php echo htmlspecialchars($item['created_at']); ?></td>
-                                    <td><?php echo htmlspecialchars($item['updated_at'] ?: 'N/A'); ?></td>
+                                    <td><?php echo htmlspecialchars($item['created_at'] ?? 'N/A'); ?></td>
+                                    <td><?php echo htmlspecialchars($item['updated_at'] ?? 'N/A'); ?></td>
                                     <td>
                                         <a href="menu.php?action=edit&id=<?php echo $item['id']; ?>" class="btn btn-primary btn-small"><i class="fas fa-edit"></i></a>
                                         <a href="menu.php?action=copy&id=<?php echo $item['id']; ?>" class="btn btn-primary btn-small"><i class="fas fa-copy"></i></a>
