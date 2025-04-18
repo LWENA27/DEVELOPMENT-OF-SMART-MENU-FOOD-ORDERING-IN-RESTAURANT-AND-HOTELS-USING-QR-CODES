@@ -1,61 +1,47 @@
 <?php
+// smart-menu/admin/login.php
 session_start();
+require_once '../includes/auth.php';
 
-// Database connection
-$host = "localhost";
-$db = "smart_menu";
-$user = "root";
-$pass = ""; // Default XAMPP password is empty
-
-$conn = new mysqli($host, $user, $pass, $db);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
+// Redirect if already logged in
+if (isLoggedIn()) {
+    header('Location: index.php');
+    exit;
 }
 
-$error = "";
-
+$error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
-
-    $stmt = $conn->prepare("SELECT * FROM users WHERE username = ?");
-    $stmt->bind_param("s", $username);
-
-    $stmt->execute();
-    $result = $stmt->get_result();
-
-    if ($result && $user = $result->fetch_assoc()) {
-        if (password_verify($password, $user['password'])) {
-            // Login successful
-            $_SESSION['user'] = $user['username'];
-            $_SESSION['role'] = $user['role'];
-            header("Location: index.php");
-            exit();
-        } else {
-            $error = "Invalid password.";
-        }
+    
+    if (loginUser($username, $password)) {
+        header('Location: index.php');
+        exit;
     } else {
-        $error = "User not found.";
+        $error = 'Invalid username or password';
     }
 }
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Login - Smart Menu</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Smart Menu</title>
+    <link rel="stylesheet" href="../assets/css/admin.css">
 </head>
 <body>
-    <h2>Admin Login</h2>
-    <?php if ($error) echo "<p style='color:red;'>$error</p>"; ?>
-    <form method="POST">
-        <label>Username:</label>
-        <input type="text" name="username" required><br><br>
-        <label>Password:</label>
-        <input type="password" name="password" required><br><br>
-        <button type="submit">Login</button>
-    </form>
+    <div class="admin-container">
+        <h2>Admin Login</h2>
+        <?php if ($error): ?>
+            <p style="color: red;"><?php echo htmlspecialchars($error); ?></p>
+        <?php endif; ?>
+        <form method="POST">
+            <label>Username: <input type="text" name="username" required></label><br><br>
+            <label>Password: <input type="password" name="password" required></label><br><br>
+            <button type="submit">Login</button>
+        </form>
+    </div>
 </body>
 </html>

@@ -1,7 +1,7 @@
 <?php
-// includes/db.php - Database connection
+// smart-menu/includes/db.php - Database connection
 
-require_once 'config.php';
+require_once __DIR__ . '/config.php';
 
 class Database {
     private $connection;
@@ -11,10 +11,13 @@ class Database {
         $this->connection = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
         
         if ($this->connection->connect_error) {
-            die('Database connection failed: ' . $this->connection->connect_error);
+            error_log('Database connection failed: ' . $this->connection->connect_error);
+            die('Database connection failed');
         }
         
-        $this->connection->set_charset('utf8mb4');
+        if (!$this->connection->set_charset('utf8mb4')) {
+            error_log('Failed to set charset: ' . $this->connection->error);
+        }
     }
     
     public static function getInstance() {
@@ -28,16 +31,8 @@ class Database {
         return $this->connection;
     }
     
-    public function query($sql) {
-        return $this->connection->query($sql);
-    }
-    
     public function prepare($sql) {
         return $this->connection->prepare($sql);
-    }
-    
-    public function escape($value) {
-        return $this->connection->real_escape_string($value);
     }
     
     public function getLastId() {
@@ -49,19 +44,23 @@ class Database {
     }
     
     public function beginTransaction() {
-        $this->connection->begin_transaction();
+        return $this->connection->begin_transaction();
     }
     
     public function commit() {
-        $this->connection->commit();
+        return $this->connection->commit();
     }
     
     public function rollback() {
-        $this->connection->rollback();
+        return $this->connection->rollback();
     }
     
     public function close() {
-        $this->connection->close();
+        if ($this->connection) {
+            $this->connection->close();
+            $this->connection = null;
+            self::$instance = null;
+        }
     }
 }
 

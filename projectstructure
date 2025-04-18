@@ -1,0 +1,18 @@
+smart-menu/
+├── admin/
+│   ├── includes/
+│   │   └── sidebar.php
+│   ├── index.php
+│   ├── login.php
+│   └── logout.php
+├── includes/
+│   ├── config.php
+│   ├── db.php
+│   └── auth.php
+├── assets/
+│   ├── css/
+│   │   └── admin.css
+│   └── js/
+│       └── admin.js
+├── qr-gen/
+└── index.php
