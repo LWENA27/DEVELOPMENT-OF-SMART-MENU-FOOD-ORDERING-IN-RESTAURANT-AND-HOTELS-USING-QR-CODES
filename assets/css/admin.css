@@ -1,4 +1,4 @@
-/**
+/* /**
  * smart-menu/assets/css/admin.css - Stylesheet for admin panel
  */
 
@@ -377,4 +377,103 @@ input:focus, select:focus {
     .main-content {
         margin-left: 0;
     }
+}
+
+/* Form layout improvements */
+.form-group {
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-card {
+    background: var(--card-bg);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 20px;
+    width: 100%;
+    max-width: 1200px;
+}
+
+.dashboard-card form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin: 0;
+    max-width: 100%;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 14px;
+    margin-right: 5px;
+}
+
+.btn-secondary {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #ff6b81;
+}
+
+/* Fix mobile layout */
+@media (max-width: 768px) {
+    .dashboard-card form {
+        grid-template-columns: 1fr;
+    }
+
+    .data-table {
+        overflow-x: auto;
+        display: block;
+    }
+}
+
+/* Improve error and success messages */
+.error-container, .success-message {
+    margin-bottom: 20px;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.error-container {
+    background-color: rgba(255, 71, 87, 0.1);
+    border: 1px solid var(--error-color);
+}
+
+.success-message {
+    background-color: rgba(46, 213, 115, 0.1);
+    border: 1px solid var(--success-color);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.error-message {
+    color: var(--error-color);
+    margin: 5px 0;
+}
+
+/* Form field styling */
+textarea {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px 12px;
+    width: 100%;
+    font-family: inherit;
+    min-height: 100px;
+    resize: vertical;
+}
+
+textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+    width: auto;
+    margin-right: 10px;
 }

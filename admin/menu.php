@@ -248,9 +248,9 @@ if ($db) {
                                     <td><?php echo htmlspecialchars($item['name']); ?></td>
                                     <td><?php echo htmlspecialchars($item['description'] ?: 'N/A'); ?></td>
                                     <td><?php echo number_format($item['price'], 2); ?></td>
-                                    <td><?php echo htmlspecialchars($item['category']); ?></td>
-                                    <td><?php echo htmlspecialchars($item['stock']); ?></td>
-                                    <td><?php echo $item['is_available'] ? 'Yes' : 'No'; ?></td>
+                                    <td><?php echo htmlspecialchars($item['category_id'] ?? 'N/A'); ?></td>
+                                    <td><?php echo isset($item['stock']) ? htmlspecialchars($item['stock']) : '0'; ?></td>
+                                    <td><?php echo isset($item['is_available']) && $item['is_available'] ? 'Yes' : 'No'; ?></td>
                                     <td><?php echo htmlspecialchars($item['created_at']); ?></td>
                                     <td><?php echo htmlspecialchars($item['updated_at'] ?: 'N/A'); ?></td>
                                     <td>
