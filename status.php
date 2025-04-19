@@ -10,7 +10,7 @@ define('ORDER_STATUS_READY', 'ready');
 define('ORDER_STATUS_DELIVERED', 'delivered');
 define('ORDER_STATUS_CANCELLED', 'cancelled');
 
-// Define status colors and labels
+// Define status colors and labels (with Swahili translations)
 const ORDER_STATUS_COLORS = [
     ORDER_STATUS_PENDING => '#f39c12',    // Orange for pending
     ORDER_STATUS_PREPARING => '#3498db',  // Blue for preparing
@@ -19,7 +19,7 @@ const ORDER_STATUS_COLORS = [
     ORDER_STATUS_CANCELLED => '#e74c3c'   // Red for cancelled
 ];
 
-const ORDER_STATUS_LABELS = [
+const ORDER_STATUS_LABELS_EN = [
     ORDER_STATUS_PENDING => 'Pending',
     ORDER_STATUS_PREPARING => 'Preparing',
     ORDER_STATUS_READY => 'Ready',
@@ -27,8 +27,20 @@ const ORDER_STATUS_LABELS = [
     ORDER_STATUS_CANCELLED => 'Cancelled'
 ];
 
-// Get order number from URL
-$orderNumber = isset($_GET['order']) ? trim($_GET['order']) : '';
+const ORDER_STATUS_LABELS_SW = [
+    ORDER_STATUS_PENDING => 'Inasubiri',
+    ORDER_STATUS_PREPARING => 'Inatayarishwa',
+    ORDER_STATUS_READY => 'Tayari',
+    ORDER_STATUS_DELIVERED => 'Imewasilishwa',
+    ORDER_STATUS_CANCELLED => 'Imefutwa'
+];
+
+// Determine language (default to English, switch to Swahili if requested)
+$language = isset($_GET['lang']) ? $_GET['lang'] : 'en';
+$ORDER_STATUS_LABELS = ($language === 'sw') ? ORDER_STATUS_LABELS_SW : ORDER_STATUS_LABELS_EN;
+
+// Get order number from URL (sanitize input)
+$orderNumber = isset($_GET['order']) ? htmlspecialchars(trim($_GET['order'])) : '';
 $error = '';
 $order = null;
 $orderItems = [];
@@ -36,7 +48,7 @@ $orderItems = [];
 if (!empty($orderNumber)) {
     $db = getDb();
     
-    // Get order details
+    // Get order details (using prepared statement to prevent SQL injection)
     $sql = "SELECT o.*, t.table_number, t.is_room 
             FROM orders o
             JOIN tables t ON o.table_id = t.id
@@ -48,7 +60,7 @@ if (!empty($orderNumber)) {
     $result = $stmt->get_result();
     
     if ($result->num_rows === 0) {
-        $error = "Order not found. Please check your order number.";
+        $error = ($language === 'sw') ? "Agizo halijapatikana. Tafadhali angalia namba yako ya agizo." : "Order not found. Please check your order number.";
     } else {
         $order = $result->fetch_assoc();
         
@@ -67,13 +79,12 @@ if (!empty($orderNumber)) {
             $orderItems[] = $item;
         }
     }
-    // Close the statement, but not the connection yet
     $stmt->close();
 }
 
-// Helper function for currency format
+// Helper function for currency format (prices already in TSH)
 function formatCurrency($amount) {
-    return '$' . number_format($amount, 2);
+    return number_format($amount, 0) . ' TSH';
 }
 
 // Get estimated completion time based on preparation times
@@ -94,7 +105,6 @@ function getEstimatedCompletionTime($orderItems, $orderTime, $db) {
         $stmt->close();
     }
     
-    // Add buffer time based on number of items
     $buffer = min(count($orderItems) * 2, 15);
     $totalMinutes = $maxPrepTime + $buffer;
     
@@ -108,15 +118,26 @@ function getEstimatedCompletionTime($orderItems, $orderTime, $db) {
 }
 
 // Get status timeline steps
-function getStatusTimeline($status) {
-    $steps = [
-        ['status' => ORDER_STATUS_PENDING, 'label' => 'Order Received', 'icon' => 'fa-receipt', 'complete' => false],
-        ['status' => ORDER_STATUS_PREPARING, 'label' => 'Preparing', 'icon' => 'fa-utensils', 'complete' => false],
-        ['status' => ORDER_STATUS_READY, 'label' => 'Ready', 'icon' => 'fa-check-circle', 'complete' => false],
-        ['status' => ORDER_STATUS_DELIVERED, 'label' => 'Delivered', 'icon' => 'fa-hand-holding', 'complete' => false]
+function getStatusTimeline($status, $language) {
+    $labels = ($language === 'sw') ? [
+        ORDER_STATUS_PENDING => 'Agizo Limepokelewa',
+        ORDER_STATUS_PREPARING => 'Inatayarishwa',
+        ORDER_STATUS_READY => 'Tayari',
+        ORDER_STATUS_DELIVERED => 'Imewasilishwa'
+    ] : [
+        ORDER_STATUS_PENDING => 'Order Received',
+        ORDER_STATUS_PREPARING => 'Preparing',
+        ORDER_STATUS_READY => 'Ready',
+        ORDER_STATUS_DELIVERED => 'Delivered'
     ];
     
-    // Mark completed steps
+    $steps = [
+        ['status' => ORDER_STATUS_PENDING, 'label' => $labels[ORDER_STATUS_PENDING], 'icon' => 'fa-receipt', 'complete' => false],
+        ['status' => ORDER_STATUS_PREPARING, 'label' => $labels[ORDER_STATUS_PREPARING], 'icon' => 'fa-utensils', 'complete' => false],
+        ['status' => ORDER_STATUS_READY, 'label' => $labels[ORDER_STATUS_READY], 'icon' => 'fa-check-circle', 'complete' => false],
+        ['status' => ORDER_STATUS_DELIVERED, 'label' => $labels[ORDER_STATUS_DELIVERED], 'icon' => 'fa-hand-holding', 'complete' => false]
+    ];
+    
     $currentIndex = -1;
     foreach ($steps as $index => &$step) {
         if ($status === ORDER_STATUS_CANCELLED) {
@@ -136,7 +157,6 @@ function getStatusTimeline($status) {
                     $currentIndex = 0;
                     break;
             }
-            
             $step['complete'] = $index <= $currentIndex;
         }
     }
@@ -144,37 +164,67 @@ function getStatusTimeline($status) {
     return $steps;
 }
 
-// If order exists and is valid, get estimated time and status timeline
+// Handle feedback submission
+$feedbackMessage = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_feedback']) && $order && $order['status'] === ORDER_STATUS_DELIVERED) {
+    $rating = isset($_POST['rating']) ? (int)$_POST['rating'] : 0;
+    $comments = isset($_POST['comments']) ? htmlspecialchars(trim($_POST['comments'])) : '';
+    
+    if ($rating >= 1 && $rating <= 5) {
+        $db = getDb();
+        $sql = "INSERT INTO feedback (order_id, rating, comments) VALUES (?, ?, ?)";
+        $stmt = $db->prepare($sql);
+        $stmt->bind_param("iis", $order['id'], $rating, $comments);
+        if ($stmt->execute()) {
+            $feedbackMessage = ($language === 'sw') ? "Asante kwa maoni yako!" : "Thank you for your feedback!";
+        } else {
+            $feedbackMessage = ($language === 'sw') ? "Hitilafu imetokea. Tafadhali jaribu tena." : "An error occurred. Please try again.";
+        }
+        $stmt->close();
+    } else {
+        $feedbackMessage = ($language === 'sw') ? "Tafadhali chagua ukadiriaji (1-5)." : "Please select a rating (1-5).";
+    }
+}
+
+// If order exists, get estimated time and status timeline
 $estimatedTime = null;
 $statusTimeline = [];
 
 if ($order) {
     $estimatedTime = getEstimatedCompletionTime($orderItems, $order['created_at'], $db);
-    $statusTimeline = getStatusTimeline($order['status']);
+    $statusTimeline = getStatusTimeline($order['status'], $language);
 } elseif (empty($orderNumber)) {
-    $error = "Please provide an order number to track its status.";
+    $error = ($language === 'sw') ? "Tafadhali weka namba ya agizo ili kufuatilia hali yake." : "Please provide an order number to track its status.";
 }
 
-// Close the database connection after all operations are complete
+// Close the database connection
 if (isset($db)) {
     $db->close();
 }
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?php echo $language; ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo SITE_NAME; ?> - Order Status</title>
+    <title><?php echo SITE_NAME; ?> - <?php echo ($language === 'sw') ? 'Hali ya Agizo' : 'Order Status'; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
-        /* Additional styles for status page */
+        /* Accessibility-focused styles */
+        :root {
+            --button-min-size: 48px; /* Minimum touch target size for accessibility */
+            --text-contrast: #000; /* High contrast for readability */
+            --bg-contrast: #fff;
+        }
+
         .status-container {
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
+            background: var(--bg-contrast);
+            color: var(--text-contrast);
         }
         
         .status-header {
@@ -353,11 +403,69 @@ if (isset($db)) {
         .order-input-group button {
             border-top-left-radius: 0;
             border-bottom-left-radius: 0;
+            min-width: var(--button-min-size);
+            min-height: var(--button-min-size);
+            font-size: 16px; /* Larger text for readability */
+        }
+        
+        .btn {
+            min-width: var(--button-min-size);
+            min-height: var(--button-min-size);
+            font-size: 16px;
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .feedback-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+        }
+        
+        .feedback-section h4 {
+            margin-bottom: 15px;
+        }
+        
+        .rating-stars {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+        
+        .rating-stars input {
+            display: none;
+        }
+        
+        .rating-stars label {
+            font-size: 24px;
+            color: #ddd;
+            cursor: pointer;
+        }
+        
+        .rating-stars input:checked ~ label,
+        .rating-stars label:hover,
+        .rating-stars label:hover ~ label {
+            color: #f39c12;
+        }
+        
+        .feedback-section textarea {
+            width: 100%;
+            min-height: 100px;
+            margin-bottom: 15px;
+            font-size: 16px;
         }
     </style>
 </head>
 <body>
     <div class="status-container">
+        <!-- Language Switcher -->
+        <div style="text-align: right; margin-bottom: 20px;">
+            <a href="?order=<?php echo urlencode($orderNumber); ?>&lang=en" class="<?php echo $language === 'en' ? 'active' : ''; ?>">English</a> | 
+            <a href="?order=<?php echo urlencode($orderNumber); ?>&lang=sw" class="<?php echo $language === 'sw' ? 'active' : ''; ?>">Swahili</a>
+        </div>
+
         <!-- Header -->
         <header class="header">
             <div class="logo">
@@ -367,7 +475,7 @@ if (isset($db)) {
         </header>
         
         <div class="status-header">
-            <h2>Order Status Tracking</h2>
+            <h2><?php echo ($language === 'sw') ? 'Ufuatiliaji wa Hali ya Agizo' : 'Order Status Tracking'; ?></h2>
         </div>
         
         <?php if ($error): ?>
@@ -378,53 +486,60 @@ if (isset($db)) {
             </div>
             
             <div class="order-form">
-                <p>Enter your order number to check its status:</p>
+                <p><?php echo ($language === 'sw') ? 'Ingiza namba yako ya agizo ili kufuatilia hali yake:' : 'Enter your order number to check its status:'; ?></p>
                 <form method="get" action="status.php">
                     <div class="order-input-group">
-                        <input type="text" name="order" placeholder="Enter order number (e.g., T5-20240417-123)" required>
-                        <button type="submit" class="btn btn-primary">Track</button>
+                        <input type="text" name="order" placeholder="<?php echo ($language === 'sw') ? 'Ingiza namba ya agizo (mfano, T5-20240417-123)' : 'Enter order number (e.g., T5-20240417-123)'; ?>" required>
+                        <input type="hidden" name="lang" value="<?php echo $language; ?>">
+                        <button type="submit" class="btn btn-primary"><?php echo ($language === 'sw') ? 'Fuatilia' : 'Track'; ?></button>
                     </div>
                 </form>
-                <p><a href="index.php">Return to Menu</a></p>
+                <p><a href="index.php"><?php echo ($language === 'sw') ? 'Rudi kwenye Menyu' : 'Return to Menu'; ?></a></p>
             </div>
         </div>
         <?php elseif ($order): ?>
         
         <div class="status-card">
             <div class="status-badge" style="background-color: <?php echo ORDER_STATUS_COLORS[$order['status']]; ?>">
-                <?php echo ORDER_STATUS_LABELS[$order['status']]; ?>
+                <?php echo $ORDER_STATUS_LABELS[$order['status']]; ?>
             </div>
             
-            <h3>Order #<?php echo $order['order_number']; ?></h3>
+            <h3><?php echo ($language === 'sw') ? 'Agizo #' : 'Order #'; ?><?php echo $order['order_number']; ?></h3>
             
             <div class="order-meta">
                 <div class="meta-item">
-                    <div class="meta-label">Order Date</div>
+                    <div class="meta-label"><?php echo ($language === 'sw') ? 'Tarehe ya Agizo' : 'Order Date'; ?></div>
                     <div class="meta-value"><?php echo date('M j, Y g:i A', strtotime($order['created_at'])); ?></div>
                 </div>
                 
                 <div class="meta-item">
-                    <div class="meta-label"><?php echo $order['is_room'] ? 'Room' : 'Table'; ?> Number</div>
+                    <div class="meta-label"><?php echo ($language === 'sw') ? ($order['is_room'] ? 'Namba ya Chumba' : 'Namba ya Meza') : ($order['is_room'] ? 'Room Number' : 'Table Number'); ?></div>
                     <div class="meta-value"><?php echo $order['table_number']; ?></div>
                 </div>
                 
                 <div class="meta-item">
-                    <div class="meta-label">Total Amount</div>
+                    <div class="meta-label"><?php echo ($language === 'sw') ? 'Jumla ya Kiasi' : 'Total Amount'; ?></div>
                     <div class="meta-value"><?php echo formatCurrency($order['total_amount']); ?></div>
                 </div>
                 
                 <?php if ($order['status'] !== ORDER_STATUS_CANCELLED && $order['status'] !== ORDER_STATUS_DELIVERED): ?>
                 <div class="meta-item">
-                    <div class="meta-label">Estimated Completion</div>
+                    <div class="meta-label"><?php echo ($language === 'sw') ? 'Muda wa Kumudu Unakadiriwa' : 'Estimated Completion'; ?></div>
                     <div class="meta-value"><?php echo date('g:i A', strtotime($estimatedTime['time'])); ?></div>
                 </div>
                 <?php endif; ?>
+                
+                <!-- Placeholder for M-Pesa Payment Status -->
+                <div class="meta-item">
+                    <div class="meta-label"><?php echo ($language === 'sw') ? 'Hali ya Malipo' : 'Payment Status'; ?></div>
+                    <div class="meta-value"><?php echo ($language === 'sw') ? 'Imelipwa kupitia M-Pesa' : 'Paid via M-Pesa'; ?> (Placeholder)</div>
+                </div>
             </div>
             
             <?php if ($order['status'] === ORDER_STATUS_CANCELLED): ?>
             <div class="cancelled-order">
                 <i class="fas fa-times-circle"></i>
-                <p>This order has been cancelled. Please contact staff for assistance.</p>
+                <p><?php echo ($language === 'sw') ? 'Agizo hili limefutwa. Tafadhali wasiliana na wafanyakazi kwa msaada.' : 'This order has been cancelled. Please contact staff for assistance.'; ?></p>
             </div>
             <?php else: ?>
             
@@ -443,7 +558,7 @@ if (isset($db)) {
             
             <!-- Order Items -->
             <div class="order-items-summary">
-                <h4>Order Items</h4>
+                <h4><?php echo ($language === 'sw') ? 'Bidhaa za Agizo' : 'Order Items'; ?></h4>
                 
                 <?php foreach ($orderItems as $item): ?>
                 <div class="order-item-row">
@@ -460,7 +575,7 @@ if (isset($db)) {
                         <div class="order-item-details">
                             <?php echo $item['quantity']; ?> × <?php echo formatCurrency($item['unit_price']); ?>
                             <?php if (!empty($item['special_instructions'])): ?>
-                            <div class="special-note">Note: <?php echo htmlspecialchars($item['special_instructions']); ?></div>
+                            <div class="special-note"><?php echo ($language === 'sw') ? 'Maelezo: ' : 'Note: '; ?><?php echo htmlspecialchars($item['special_instructions']); ?></div>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -473,27 +588,48 @@ if (isset($db)) {
                 
                 <?php if (!empty($order['notes'])): ?>
                 <div class="order-notes-section">
-                    <h4>Additional Notes</h4>
+                    <h4><?php echo ($language === 'sw') ? 'Maelezo ya Ziada' : 'Additional Notes'; ?></h4>
                     <p><?php echo htmlspecialchars($order['notes']); ?></p>
                 </div>
                 <?php endif; ?>
             </div>
+            
+            <!-- Feedback Form (only for delivered orders) -->
+            <?php if ($order['status'] === ORDER_STATUS_DELIVERED): ?>
+            <div class="feedback-section">
+                <h4><?php echo ($language === 'sw') ? 'Toa Maoni Yako' : 'Provide Your Feedback'; ?></h4>
+                <?php if ($feedbackMessage): ?>
+                <p style="color: <?php echo strpos($feedbackMessage, 'Thank you') !== false || strpos($feedbackMessage, 'Asante') !== false ? 'green' : 'red'; ?>;"><?php echo $feedbackMessage; ?></p>
+                <?php endif; ?>
+                <form method="post">
+                    <div class="rating-stars">
+                        <input type="radio" name="rating" id="star5" value="5"><label for="star5">★</label>
+                        <input type="radio" name="rating" id="star4" value="4"><label for="star4">★</label>
+                        <input type="radio" name="rating" id="star3" value="3"><label for="star3">★</label>
+                        <input type="radio" name="rating" id="star2" value="2"><label for="star2">★</label>
+                        <input type="radio" name="rating" id="star1" value="1"><label for="star1">★</label>
+                    </div>
+                    <textarea name="comments" placeholder="<?php echo ($language === 'sw') ? 'Andika maoni yako hapa...' : 'Write your comments here...'; ?>"></textarea>
+                    <button type="submit" name="submit_feedback" class="btn btn-primary"><?php echo ($language === 'sw') ? 'Tuma Maoni' : 'Submit Feedback'; ?></button>
+                </form>
+            </div>
+            <?php endif; ?>
         </div>
         
         <div class="refresh-status">
             <button id="refresh-btn" class="btn btn-secondary">
-                <i class="fas fa-sync-alt"></i> Refresh Status
+                <i class="fas fa-sync-alt"></i> <?php echo ($language === 'sw') ? 'Sasisha Hali' : 'Refresh Status'; ?>
             </button>
         </div>
         
         <div class="action-buttons">
-            <a href="index.php<?php echo $order['table_id'] ? '?table=' . $order['table_id'] : ''; ?>" class="btn btn-primary">Return to Menu</a>
+            <a href="index.php<?php echo $order['table_id'] ? '?table=' . $order['table_id'] : ''; ?>&lang=<?php echo $language; ?>" class="btn btn-primary"><?php echo ($language === 'sw') ? 'Rudi kwenye Menyu' : 'Return to Menu'; ?></a>
         </div>
         
         <?php endif; ?>
         
         <footer class="footer">
-            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
+            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - <?php echo ($language === 'sw') ? 'Menyu ya Dijitali' : 'Digital Menu System'; ?></p>
         </footer>
     </div>
 

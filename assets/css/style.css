@@ -294,9 +294,11 @@
     height: 60px;
     overflow: hidden;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-  }
+    -webkit-line-clamp: 3; /* WebKit-specific property */
+    -webkit-box-orient: vertical; /* Required for -webkit-line-clamp */
+    line-clamp: 3; /* Standard property for compatibility */
+    box-orient: vertical; /* Required for standard line-clamp */
+}
   
   .item-info {
     display: flex;

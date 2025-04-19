@@ -79,11 +79,31 @@ try {
     }
     $stmt->close();
 
+    // Get recent customer feedback
+    $recentFeedback = [];
+    $stmt = $db->prepare("SELECT f.id, f.rating, f.comments, f.order_id, o.order_number, t.table_number
+                         FROM feedback f
+                         JOIN orders o ON f.order_id = o.id
+                         JOIN tables t ON o.table_id = t.id
+                         ORDER BY f.id DESC
+                         LIMIT 5");
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($row = $result->fetch_assoc()) {
+        $recentFeedback[] = $row;
+    }
+    $stmt->close();
+
     $db->close();
 } catch (Exception $e) {
     error_log($e->getMessage());
     echo '<div class="error">An error occurred. Please try again later.</div>';
     exit;
+}
+
+// Helper function for currency format (prices in TSH)
+function formatCurrency($amount) {
+    return number_format($amount, 0) . ' TSH';
 }
 ?>
 
@@ -95,6 +115,53 @@ try {
     <title>Admin Dashboard - <?php echo defined('SITE_NAME') ? htmlspecialchars(SITE_NAME) : 'Smart Menu'; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../assets/css/admin.css">
+    <style>
+        /* Accessibility-focused styles */
+        :root {
+            --button-min-size: 48px; /* Minimum touch target size for accessibility */
+            --text-contrast: #000; /* High contrast for readability */
+            --bg-contrast: #fff;
+        }
+
+        .admin-container {
+            background: var(--bg-contrast);
+            color: var(--text-contrast);
+        }
+
+        .dashboard-card {
+            background: var(--bg-contrast);
+            color: var(--text-contrast);
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th, .data-table td {
+            padding: 10px;
+            text-align: left;
+            font-size: 16px; /* Larger text for readability */
+        }
+
+        .rating-stars {
+            color: #f39c12;
+        }
+
+        .action-btn {
+            min-width: var(--button-min-size);
+            min-height: var(--button-min-size);
+            font-size: 16px;
+            padding: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="admin-container">
@@ -133,7 +200,7 @@ try {
                     <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
                     <div class="stat-details">
                         <h3>Today's Sales</h3>
-                        <p class="stat-number">$<?php echo number_format($orderStats['total_sales'] ?? 0, 2); ?></p>
+                        <p class="stat-number"><?php echo formatCurrency($orderStats['total_sales'] ?? 0); ?></p>
                     </div>
                 </div>
                 
@@ -154,7 +221,7 @@ try {
                 </div>
             </div>
             
-            <!-- Recent Orders and Top Items -->
+            <!-- Recent Orders, Top Items, and Customer Feedback -->
             <div class="dashboard-grid">
                 <!-- Recent Orders -->
                 <div class="dashboard-card">
@@ -183,7 +250,7 @@ try {
                                     <tr>
                                         <td><a href="order-details.php?id=<?php echo htmlspecialchars($order['id']); ?>"><?php echo htmlspecialchars($order['order_number']); ?></a></td>
                                         <td><?php echo htmlspecialchars($order['table_number']); ?></td>
-                                        <td>$<?php echo number_format($order['total_amount'], 2); ?></td>
+                                        <td><?php echo formatCurrency($order['total_amount']); ?></td>
                                         <td><span class="status-badge status-<?php echo htmlspecialchars(strtolower($order['status'])); ?>"><?php echo htmlspecialchars(ucfirst($order['status'])); ?></span></td>
                                         <td><?php echo htmlspecialchars(date('h:i A', strtotime($order['created_at']))); ?></td>
                                     </tr>
@@ -218,6 +285,42 @@ try {
                                     <tr>
                                         <td><?php echo htmlspecialchars($item['name']); ?></td>
                                         <td><?php echo htmlspecialchars($item['total_sold']); ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Customer Feedback -->
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h2>Customer Feedback</h2>
+                        <a href="feedback.php" class="view-all">View All</a>
+                    </div>
+                    <div class="card-content">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Order #</th>
+                                    <th>Table/Room</th>
+                                    <th>Rating</th>
+                                    <th>Comments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (empty($recentFeedback)): ?>
+                                <tr>
+                                    <td colspan="4" class="no-data">No feedback available</td>
+                                </tr>
+                                <?php else: ?>
+                                    <?php foreach ($recentFeedback as $feedback): ?>
+                                    <tr>
+                                        <td><a href="order-details.php?id=<?php echo htmlspecialchars($feedback['order_id']); ?>"><?php echo htmlspecialchars($feedback['order_number']); ?></a></td>
+                                        <td><?php echo htmlspecialchars($feedback['table_number']); ?></td>
+                                        <td class="rating-stars"><?php echo str_repeat('★', $feedback['rating']) . str_repeat('☆', 5 - $feedback['rating']); ?></td>
+                                        <td><?php echo htmlspecialchars($feedback['comments'] ?: 'No comments'); ?></td>
                                     </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>

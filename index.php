@@ -1,341 +1,591 @@
 <?php
-// index.php - Customer-facing menu interface
+// index.php - Main menu page with order functionality
 require_once 'includes/config.php';
 require_once 'includes/db.php';
 
-// Get table ID from QR code
-$table_id = isset($_GET['table']) ? (int)$_GET['table'] : 0;
+// Determine language (default to English, switch to Swahili if requested)
+$language = isset($_GET['lang']) ? $_GET['lang'] : 'en';
+
+// Get table ID from URL (sanitize input)
+$tableId = isset($_GET['table']) ? (int)$_GET['table'] : 0;
+$table = null;
+$categories = [];
+$menuItems = [];
+$cart = [];
 $error = '';
 
-// Validate table ID
+// Connect to the database
 $db = getDb();
-$stmt = $db->prepare("SELECT id, table_number, is_room FROM tables WHERE id = ?");
-$stmt->bind_param("i", $table_id);
-$stmt->execute();
-$result = $stmt->get_result();
 
-if ($result->num_rows === 0) {
-    $error = "Invalid table or room. Please scan a valid QR code.";
-    $table = null;
-} else {
-    $table = $result->fetch_assoc();
-}
-
-// Get current date
-$today = date('Y-m-d');
-
-// Get menu categories with available items
-$categories = [];
-if (!$error) {
-    $sql = "SELECT DISTINCT c.id, c.name, c.description
-            FROM categories c
-            JOIN menu_items m ON c.id = m.category_id
-            JOIN daily_menu dm ON m.id = dm.menu_item_id
-            WHERE dm.date_available = ? AND dm.is_available = 1
-            ORDER BY c.name";
-    
+// Validate table ID
+if ($tableId > 0) {
+    $sql = "SELECT * FROM tables WHERE id = ?";
     $stmt = $db->prepare($sql);
-    $stmt->bind_param("s", $today);
+    $stmt->bind_param("i", $tableId);
     $stmt->execute();
     $result = $stmt->get_result();
     
-    while ($row = $result->fetch_assoc()) {
-        $categories[] = $row;
-    }
-}
-
-// Function to format preparation time
-function formatPrepTime($minutes, $isFastFood) {
-    if ($isFastFood) {
-        return "<span class='fast-food'>Fast Food - $minutes min</span>";
+    if ($result->num_rows === 0) {
+        $error = ($language === 'sw') ? "Meza haipatikani. Tafadhali angalia namba ya meza." : "Table not found. Please check the table number.";
     } else {
-        return "<span class='regular-prep'>$minutes min preparation</span>";
-    }
-}
-
-// Handle order submission
-$orderSuccess = false;
-$orderNumber = '';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
-    try {
-        $db->begin_transaction();
+        $table = $result->fetch_assoc();
         
-        // Check if we have items in the cart
-        if (!empty($_POST['items']) && is_array($_POST['items'])) {
-            $tableId = $_POST['table_id'];
-            $notes = trim($_POST['order_notes']);
-            $totalAmount = 0;
-            
-            // Generate order number: TableNumber-YYYYMMDD-Sequence
-            $sequence = mt_rand(100, 999);
-            $dateCode = date('Ymd');
-            $tableQuery = $db->prepare("SELECT table_number FROM tables WHERE id = ?");
-            $tableQuery->bind_param("i", $tableId);
-            $tableQuery->execute();
-            $tableResult = $tableQuery->get_result();
-            $tableRow = $tableResult->fetch_assoc();
-            $tableNumber = $tableRow['table_number'];
-            $orderNumber = $tableNumber . '-' . $dateCode . '-' . $sequence;
-            
-            // Create order record
-            $orderStmt = $db->prepare("INSERT INTO orders (table_id, order_number, status, total_amount, notes) VALUES (?, ?, 'pending', 0, ?)");
-            $orderStmt->bind_param("iss", $tableId, $orderNumber, $notes);
-            $orderStmt->execute();
-            $orderId = $db->insert_id;
-            
-            // Process each item
-            foreach ($_POST['items'] as $itemId => $qty) {
-                $qty = (int)$qty;
-                if ($qty <= 0) continue;
-                
-                // Get item details
-                $itemStmt = $db->prepare("SELECT m.id, m.name, dm.special_price, m.price 
-                                         FROM menu_items m 
-                                         JOIN daily_menu dm ON m.id = dm.menu_item_id 
-                                         WHERE m.id = ? AND dm.date_available = ? AND dm.is_available = 1");
-                $itemStmt->bind_param("is", $itemId, $today);
-                $itemStmt->execute();
-                $itemResult = $itemStmt->get_result();
-                
-                if ($item = $itemResult->fetch_assoc()) {
-                    $unitPrice = !is_null($item['special_price']) ? $item['special_price'] : $item['price'];
-                    $specialInstructions = isset($_POST['instructions'][$itemId]) ? trim($_POST['instructions'][$itemId]) : '';
-                    
-                    // Add item to order
-                    $orderItemStmt = $db->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, special_instructions) 
-                                                 VALUES (?, ?, ?, ?, ?)");
-                   $orderItemStmt->bind_param("iiids", $orderId, $itemId, $qty, $unitPrice, $specialInstructions);
-                    $orderItemStmt->execute();
-                    
-                    // Add to total amount
-                    $totalAmount += ($unitPrice * $qty);
-                }
-            }
-            
-            // Update order total
-            $updateOrderStmt = $db->prepare("UPDATE orders SET total_amount = ? WHERE id = ?");
-            $updateOrderStmt->bind_param("di", $totalAmount, $orderId);
-            $updateOrderStmt->execute();
-            
-            $db->commit();
-            $orderSuccess = true;
+        // Fetch categories
+        $sql = "SELECT * FROM categories ORDER BY name ASC";
+        $result = $db->query($sql);
+        while ($row = $result->fetch_assoc()) {
+            $categories[] = $row;
         }
-    } catch (Exception $e) {
-        $db->rollback();
-        $error = "Failed to place order: " . $e->getMessage();
+        
+        // Fetch menu items with their categories
+        $sql = "SELECT mi.*, c.name as category_name 
+                FROM menu_items mi 
+                JOIN categories c ON mi.category_id = c.id 
+                WHERE mi.is_available = 1 
+                ORDER BY c.name ASC, mi.name ASC";
+        $result = $db->query($sql);
+        while ($row = $result->fetch_assoc()) {
+            $menuItems[] = $row;
+        }
+        
+        // Group menu items by category
+        $menuItemsByCategory = [];
+        foreach ($menuItems as $item) {
+            $menuItemsByCategory[$item['category_name']][] = $item;
+        }
     }
+    $stmt->close();
+} else {
+    $error = ($language === 'sw') ? "Tafadhali toa namba ya meza ili kuendelea." : "Please provide a table number to proceed.";
 }
+
+// Handle cart operations (Add to cart, Update quantity, Remove)
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    session_start();
+    $cart = isset($_SESSION['cart'][$tableId]) ? $_SESSION['cart'][$tableId] : [];
+    
+    if (isset($_POST['add_to_cart'])) {
+        $itemId = (int)$_POST['item_id'];
+        $quantity = (int)$_POST['quantity'];
+        $specialInstructions = htmlspecialchars(trim($_POST['special_instructions']));
+        
+        // Validate item exists
+        $sql = "SELECT * FROM menu_items WHERE id = ? AND is_available = 1";
+        $stmt = $db->prepare($sql);
+        $stmt->bind_param("i", $itemId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        if ($result->num_rows > 0) {
+            $item = $result->fetch_assoc();
+            $cartKey = $itemId . '-' . md5($specialInstructions);
+            
+            if (isset($cart[$cartKey])) {
+                $cart[$cartKey]['quantity'] += $quantity;
+            } else {
+                $cart[$cartKey] = [
+                    'item_id' => $itemId,
+                    'name' => $item['name'],
+                    'price' => $item['price'],
+                    'quantity' => $quantity,
+                    'special_instructions' => $specialInstructions
+                ];
+            }
+        }
+        $stmt->close();
+    } elseif (isset($_POST['update_cart'])) {
+        $cartKey = $_POST['cart_key'];
+        $quantity = (int)$_POST['quantity'];
+        
+        if ($quantity <= 0) {
+            unset($cart[$cartKey]);
+        } else {
+            $cart[$cartKey]['quantity'] = $quantity;
+        }
+    } elseif (isset($_POST['remove_item'])) {
+        $cartKey = $_POST['cart_key'];
+        unset($cart[$cartKey]);
+    } elseif (isset($_POST['place_order']) && !empty($cart)) {
+        $notes = htmlspecialchars(trim($_POST['order_notes']));
+        
+        // Calculate total amount
+        $totalAmount = 0;
+        foreach ($cart as $item) {
+            $totalAmount += $item['price'] * $item['quantity'];
+        }
+        
+        // Generate order number
+        $orderNumber = 'T' . $tableId . '-' . date('Ymd') . '-' . rand(100, 999);
+        
+        // Insert order into database
+        $sql = "INSERT INTO orders (order_number, table_id, total_amount, status, notes, created_at) 
+                VALUES (?, ?, ?, 'pending', ?, NOW())";
+        $stmt = $db->prepare($sql);
+        $stmt->bind_param("sids", $orderNumber, $tableId, $totalAmount, $notes);
+        $stmt->execute();
+        $orderId = $stmt->insert_id;
+        
+        // Insert order items
+        $sql = "INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, special_instructions) 
+                VALUES (?, ?, ?, ?, ?)";
+        $stmt = $db->prepare($sql);
+        
+        foreach ($cart as $item) {
+            $stmt->bind_param("iiids", $orderId, $item['item_id'], $item['quantity'], $item['price'], $item['special_instructions']);
+            $stmt->execute();
+        }
+        
+        // Clear cart after placing order
+        $cart = [];
+        $_SESSION['cart'][$tableId] = [];
+        
+        // Redirect to status page with language parameter
+        header("Location: status.php?order=" . urlencode($orderNumber) . "&lang=" . $language);
+        exit;
+    }
+    
+    // Update session cart
+    $_SESSION['cart'][$tableId] = $cart;
+}
+
+// Helper function for currency format (prices already in TSH)
+function formatCurrency($amount) {
+    return number_format($amount, 0) . ' TSH';
+}
+
+// Calculate cart totals
+$cartSubtotal = 0;
+foreach ($cart as $item) {
+    $cartSubtotal += $item['price'] * $item['quantity'];
+}
+
+// Close database connection
+$db->close();
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?php echo $language; ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo SITE_NAME; ?> - Digital Menu</title>
+    <title><?php echo SITE_NAME; ?> - <?php echo ($language === 'sw') ? 'Menyu ya Dijitali' : 'Digital Menu'; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/style.css">
+    <style>
+        /* Accessibility-focused styles */
+        :root {
+            --button-min-size: 48px; /* Minimum touch target size for accessibility */
+            --text-contrast: #000; /* High contrast for readability */
+            --bg-contrast: #fff;
+        }
+
+        .menu-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: var(--bg-contrast);
+            color: var(--text-contrast);
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo img {
+            width: 40px;
+            margin-right: 10px;
+        }
+        
+        .category-section {
+            margin-bottom: 40px;
+        }
+        
+        .category-section h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 5px;
+        }
+        
+        .menu-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .menu-item {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 15px;
+            display: flex;
+            transition: var(--transition);
+        }
+        
+        .menu-item:hover {
+            transform: translateY(-5px);
+        }
+        
+        .menu-item-image {
+            width: 100px;
+            height: 100px;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-right: 15px;
+        }
+        
+        .menu-item-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .menu-item-info {
+            flex: 1;
+        }
+        
+        .menu-item-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .menu-item-description {
+            font-size: 14px;
+            color: #747d8c;
+            margin-bottom: 10px;
+        }
+        
+        .menu-item-price {
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+        
+        .menu-item-form {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .menu-item-form input[type="number"] {
+            width: 60px;
+            padding: 5px;
+            font-size: 16px;
+        }
+        
+        .menu-item-form input[type="text"] {
+            flex: 1;
+            padding: 5px;
+            font-size: 16px;
+        }
+        
+        .menu-item-form button {
+            min-width: var(--button-min-size);
+            min-height: var(--button-min-size);
+            font-size: 16px;
+            padding: 5px 10px;
+        }
+        
+        .cart-section {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .cart-section h3 {
+            margin-bottom: 20px;
+        }
+        
+        .cart-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .cart-item-info {
+            flex: 1;
+        }
+        
+        .cart-item-name {
+            font-weight: bold;
+        }
+        
+        .cart-item-details {
+            font-size: 12px;
+            color: #747d8c;
+        }
+        
+        .cart-item-controls {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .cart-item-controls input {
+            width: 50px;
+            padding: 5px;
+            font-size: 16px;
+        }
+        
+        .cart-item-controls button {
+            min-width: var(--button-min-size);
+            min-height: var(--button-min-size);
+            font-size: 16px;
+            padding: 5px;
+        }
+        
+        .cart-subtotal {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        
+        .order-notes {
+            margin-top: 20px;
+        }
+        
+        .order-notes textarea {
+            width: 100%;
+            min-height: 80px;
+            font-size: 16px;
+        }
+        
+        .place-order-btn {
+            margin-top: 20px;
+            width: 100%;
+            min-height: var(--button-min-size);
+            font-size: 16px;
+        }
+        
+        .offline-message {
+            background-color: #ffeaa7;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            display: none;
+        }
+    </style>
 </head>
 <body>
     <div class="menu-container">
+        <!-- Language Switcher -->
+        <div style="text-align: right; margin-bottom: 20px;">
+            <a href="?table=<?php echo $tableId; ?>&lang=en" class="<?php echo $language === 'en' ? 'active' : ''; ?>">English</a> | 
+            <a href="?table=<?php echo $tableId; ?>&lang=sw" class="<?php echo $language === 'sw' ? 'active' : ''; ?>">Swahili</a>
+        </div>
+
         <!-- Header -->
         <header class="header">
             <div class="logo">
                 <img src="assets/images/logo.png" alt="<?php echo SITE_NAME; ?>">
                 <h1><?php echo SITE_NAME; ?></h1>
             </div>
-            
-            <?php if ($table): ?>
             <div class="table-info">
-                <i class="fas <?php echo $table['is_room'] ? 'fa-bed' : 'fa-utensils'; ?>"></i>
-                <span><?php echo $table['is_room'] ? 'Room' : 'Table'; ?>: <?php echo $table['table_number']; ?></span>
-            </div>
-            <?php endif; ?>
-            
-            <div class="cart-icon" id="cart-icon">
-                <i class="fas fa-shopping-cart"></i>
-                <span class="cart-count">0</span>
+                <h3><?php echo ($language === 'sw') ? ($table['is_room'] ? 'Chumba #' : 'Meza #') : ($table['is_room'] ? 'Room #' : 'Table #'); ?><?php echo $table['table_number'] ?? ''; ?></h3>
             </div>
         </header>
         
+        <!-- Offline Message -->
+        <div class="offline-message" id="offlineMessage">
+            <p><?php echo ($language === 'sw') ? 'Uko nje ya mtandao. Unaweza kuona menyu lakini huwezi kuagiza hadi uunganishwe kwenye mtandao.' : 'You are offline. You can view the menu, but you cannot place an order until you are online.'; ?></p>
+        </div>
+
         <?php if ($error): ?>
         <div class="error-container">
             <div class="error-message">
                 <i class="fas fa-exclamation-circle"></i>
                 <p><?php echo $error; ?></p>
             </div>
-            <p>Please scan a valid QR code to access the menu.</p>
-        </div>
-        <?php elseif ($orderSuccess): ?>
-        <div class="order-success">
-            <div class="success-icon">
-                <i class="fas fa-check-circle"></i>
-            </div>
-            <h2>Order Placed Successfully!</h2>
-            <p>Your order number: <strong><?php echo $orderNumber; ?></strong></p>
-            <p>We are preparing your order. Thank you for your patience!</p>
-            <div class="action-buttons">
-                <a href="index.php?table=<?php echo $table_id; ?>" class="btn btn-primary">Order More Items</a>
-                <a href="status.php?order=<?php echo $orderNumber; ?>" class="btn btn-secondary">Track Order Status</a>
-            </div>
         </div>
         <?php else: ?>
         
-        <!-- Menu Categories Navigation -->
-        <nav class="category-nav">
-            <ul>
-                <?php foreach ($categories as $category): ?>
-                <li><a href="#category-<?php echo $category['id']; ?>"><?php echo $category['name']; ?></a></li>
+        <!-- Menu Categories and Items -->
+        <?php foreach ($menuItemsByCategory as $categoryName => $items): ?>
+        <div class="category-section">
+            <h2><?php echo htmlspecialchars($categoryName); ?></h2>
+            <div class="menu-items" id="category-<?php echo htmlspecialchars($categoryName); ?>">
+                <?php foreach ($items as $item): ?>
+                <div class="menu-item">
+                    <div class="menu-item-image">
+                        <?php if (!empty($item['image']) && file_exists(UPLOADS_DIR . $item['image'])): ?>
+                        <img src="<?php echo UPLOADS_URL . $item['image']; ?>" alt="<?php echo htmlspecialchars($item['name']); ?>">
+                        <?php else: ?>
+                        <img src="assets/images/default-food.jpg" alt="<?php echo htmlspecialchars($item['name']); ?>">
+                        <?php endif; ?>
+                    </div>
+                    <div class="menu-item-info">
+                        <div class="menu-item-name"><?php echo htmlspecialchars($item['name']); ?></div>
+                        <div class="menu-item-description"><?php echo htmlspecialchars($item['description']); ?></div>
+                        <div class="menu-item-price"><?php echo formatCurrency($item['price']); ?></div>
+                        <form method="post" class="menu-item-form">
+                            <input type="hidden" name="item_id" value="<?php echo $item['id']; ?>">
+                            <input type="number" name="quantity" value="1" min="1" required>
+                            <input type="text" name="special_instructions" placeholder="<?php echo ($language === 'sw') ? 'Maelezo ya Ziada (mfano, bila vitunguu)' : 'Special Instructions (e.g., no onions)'; ?>">
+                            <button type="submit" name="add_to_cart" class="btn btn-primary">
+                                <i class="fas fa-cart-plus"></i> <?php echo ($language === 'sw') ? 'Ongeza' : 'Add'; ?>
+                            </button>
+                        </form>
+                    </div>
+                </div>
                 <?php endforeach; ?>
-            </ul>
-        </nav>
+            </div>
+        </div>
+        <?php endforeach; ?>
         
-        <!-- Menu Items -->
-        <div class="menu-content">
-            <form id="order-form" method="post" action="index.php?table=<?php echo $table_id; ?>">
-                <input type="hidden" name="table_id" value="<?php echo $table_id; ?>">
-                
-                <?php if (empty($categories)): ?>
-                <div class="no-menu">
-                    <p>No menu items available today. Please check back later or contact staff for assistance.</p>
-                </div>
-                <?php else: ?>
-                    <?php foreach ($categories as $category): ?>
-                    <section class="menu-section" id="category-<?php echo $category['id']; ?>">
-                        <h2 class="category-title"><?php echo $category['name']; ?></h2>
-                        <p class="category-desc"><?php echo $category['description']; ?></p>
-                        
-                        <div class="menu-items">
-                            <?php
-                            // Get items for this category
-                            $sql = "SELECT m.id, m.name, m.description, m.price, m.preparation_time, m.is_fast_food, 
-                                   dm.special_price, m.image
-                                   FROM menu_items m
-                                   JOIN daily_menu dm ON m.id = dm.menu_item_id
-                                   WHERE m.category_id = ? AND dm.date_available = ? AND dm.is_available = 1
-                                   ORDER BY m.name";
-                            
-                            $stmt = $db->prepare($sql);
-                            $stmt->bind_param("is", $category['id'], $today);
-                            $stmt->execute();
-                            $result = $stmt->get_result();
-                            
-                            while ($item = $result->fetch_assoc()):
-                                $price = !is_null($item['special_price']) ? $item['special_price'] : $item['price'];
-                                $hasDiscount = !is_null($item['special_price']) && $item['special_price'] < $item['price'];
-                            ?>
-                            <div class="menu-item" data-id="<?php echo $item['id']; ?>">
-                                <div class="item-image">
-                                    <?php if (!empty($item['image']) && file_exists(UPLOADS_DIR . $item['image'])): ?>
-                                    <img src="<?php echo UPLOADS_URL . $item['image']; ?>" alt="<?php echo $item['name']; ?>">
-                                    <?php else: ?>
-                                    <img src="assets/images/default-food.jpg" alt="<?php echo $item['name']; ?>">
-                                    <?php endif; ?>
-                                </div>
-                                
-                                <div class="item-details">
-                                    <h3 class="item-name"><?php echo $item['name']; ?></h3>
-                                    <p class="item-desc"><?php echo $item['description']; ?></p>
-                                    <div class="item-info">
-                                        <p class="item-price">
-                                            <?php if ($hasDiscount): ?>
-                                            <span class="original-price"><?php echo formatCurrency($item['price']); ?></span>
-                                            <span class="special-price"><?php echo formatCurrency($price); ?></span>
-                                            <?php else: ?>
-                                            <?php echo formatCurrency($price); ?>
-                                            <?php endif; ?>
-                                        </p>
-                                        <p class="prep-time"><?php echo formatPrepTime($item['preparation_time'], $item['is_fast_food']); ?></p>
-                                    </div>
-                                </div>
-                                
-                                <div class="item-actions">
-                                    <div class="quantity-control">
-                                        <button type="button" class="qty-btn qty-minus" data-id="<?php echo $item['id']; ?>"><i class="fas fa-minus"></i></button>
-                                        <input type="number" name="items[<?php echo $item['id']; ?>]" value="0" min="0" max="20" class="qty-input" data-id="<?php echo $item['id']; ?>">
-                                        <button type="button" class="qty-btn qty-plus" data-id="<?php echo $item['id']; ?>"><i class="fas fa-plus"></i></button>
-                                    </div>
-                                    <div class="special-instructions">
-                                        <textarea name="instructions[<?php echo $item['id']; ?>]" placeholder="Special instructions..."></textarea>
-                                    </div>
-                                </div>
-                            </div>
-                            <?php endwhile; ?>
-                        </div>
-                    </section>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-                
-                <!-- Order Summary -->
-                <div class="order-summary" id="order-summary">
-                    <h2><i class="fas fa-shopping-cart"></i> Your Order</h2>
-                    <div class="order-items-list" id="order-items-list">
-                        <p class="empty-cart">Your cart is empty. Add items to place an order.</p>
-                    </div>
-                    <div class="order-total">
-                        <p>Total: <span id="total-amount"><?php echo formatCurrency(0); ?></span></p>
-                    </div>
-                    <div class="order-notes">
-                        <label for="order_notes">Additional notes for the kitchen:</label>
-                        <textarea name="order_notes" id="order_notes"></textarea>
-                    </div>
-                    <div class="order-actions">
-                        <button type="submit" name="place_order" class="btn btn-primary" id="place-order-btn" disabled>Place Order</button>
-                        <button type="button" class="btn btn-secondary" id="clear-cart-btn">Clear Cart</button>
+        <!-- Cart Section -->
+        <div class="cart-section">
+            <h3><?php echo ($language === 'sw') ? 'Rukwama' : 'Cart'; ?> (<?php echo count($cart); ?> <?php echo ($language === 'sw') ? 'Bidhaa' : 'Items'; ?>)</h3>
+            
+            <?php if (empty($cart)): ?>
+            <p><?php echo ($language === 'sw') ? 'Rukwama yako ni tupu.' : 'Your cart is empty.'; ?></p>
+            <?php else: ?>
+            <?php foreach ($cart as $cartKey => $item): ?>
+            <div class="cart-item">
+                <div class="cart-item-info">
+                    <div class="cart-item-name"><?php echo htmlspecialchars($item['name']); ?></div>
+                    <div class="cart-item-details">
+                        <?php echo $item['quantity']; ?> × <?php echo formatCurrency($item['price']); ?>
+                        <?php if (!empty($item['special_instructions'])): ?>
+                        <div class="special-note"><?php echo ($language === 'sw') ? 'Maelezo: ' : 'Note: '; ?><?php echo htmlspecialchars($item['special_instructions']); ?></div>
+                        <?php endif; ?>
                     </div>
                 </div>
+                <div class="cart-item-controls">
+                    <form method="post">
+                        <input type="hidden" name="cart_key" value="<?php echo $cartKey; ?>">
+                        <input type="number" name="quantity" value="<?php echo $item['quantity']; ?>" min="0">
+                        <button type="submit" name="update_cart" class="btn btn-secondary"><i class="fas fa-sync"></i></button>
+                        <button type="submit" name="remove_item" class="btn btn-danger"><i class="fas fa-trash"></i></button>
+                    </form>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            
+            <div class="cart-subtotal">
+                <?php echo ($language === 'sw') ? 'Jumla Ndogo: ' : 'Subtotal: '; ?><?php echo formatCurrency($cartSubtotal); ?>
+            </div>
+            
+            <div class="order-notes">
+                <textarea name="order_notes" placeholder="<?php echo ($language === 'sw') ? 'Maelezo ya Agizo (hiari)' : 'Order Notes (optional)'; ?>"></textarea>
+            </div>
+            
+            <!-- Placeholder for M-Pesa Payment -->
+            <div style="margin-top: 10px; font-size: 14px; color: #747d8c;">
+                <?php echo ($language === 'sw') ? 'Malipo yatakubaliwa kupitia M-Pesa' : 'Payment will be processed via M-Pesa'; ?> (Placeholder)
+            </div>
+            
+            <form method="post">
+                <input type="hidden" name="order_notes" value="<?php echo isset($_POST['order_notes']) ? htmlspecialchars($_POST['order_notes']) : ''; ?>">
+                <button type="submit" name="place_order" class="btn btn-primary place-order-btn"><?php echo ($language === 'sw') ? 'Weka Agizo' : 'Place Order'; ?></button>
             </form>
+            
+            <p style="margin-top: 10px; text-align: center;">
+                <a href="status.php?order=<?php echo isset($orderNumber) ? urlencode($orderNumber) : ''; ?>&lang=<?php echo $language; ?>">
+                    <?php echo ($language === 'sw') ? 'Fuatilia Agizo' : 'Track Order'; ?>
+                </a>
+            </p>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
         
         <footer class="footer">
-            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
-            <p><a href="#" id="call-waiter-btn"><i class="fas fa-bell"></i> Call Waiter</a></p>
+            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - <?php echo ($language === 'sw') ? 'Menyu ya Dijitali' : 'Digital Menu System'; ?></p>
         </footer>
     </div>
-    
-    <!-- Call Waiter Modal -->
-    <div id="waiter-modal" class="modal">
-        <div class="modal-content">
-            <span class="close-modal">×</span>
-            <h2><i class="fas fa-bell"></i> Call Waiter</h2>
-            <p>How can we help you?</p>
-            <form id="waiter-form">
-                <div class="request-options">
-                    <button type="button" class="request-btn" data-request="water">Water</button>
-                    <button type="button" class="request-btn" data-request="cutlery">Cutlery</button>
-                    <button type="button" class="request-btn" data-request="napkins">Napkins</button>
-                    <button type="button" class="request-btn" data-request="bill">Bill</button>
-                </div>
-                <div class="other-request">
-                    <label for="other-request">Other request:</label>
-                    <textarea id="other-request" placeholder="Please specify..."></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Send Request</button>
-            </form>
-            <div id="waiter-response" class="hidden">
-                <div class="success-message">
-                    <i class="fas fa-check-circle"></i>
-                    <p>Your request has been received. A staff member will be with you shortly.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Helper function for currency format -->
-    <?php 
-    function formatCurrency($amount) {
-        return '$' . number_format($amount, 2);
-    }
-    ?>
 
-    <script src="assets/js/menu.js"></script>
     <script>
-        // Initialize with table ID for socket connections
+        // Offline functionality: Cache menu data in local storage
         document.addEventListener('DOMContentLoaded', function() {
-            initMenu(<?php echo $table_id; ?>);
+            const menuData = <?php echo json_encode($menuItemsByCategory); ?>;
+            const language = '<?php echo $language; ?>';
+            
+            // Store menu data in local storage
+            localStorage.setItem('menuData', JSON.stringify(menuData));
+            localStorage.setItem('language', language);
+            
+            // Check online status
+            const offlineMessage = document.getElementById('offlineMessage');
+            function updateOnlineStatus() {
+                if (!navigator.onLine) {
+                    offlineMessage.style.display = 'block';
+                    // Disable order buttons when offline
+                    document.querySelectorAll('button[name="add_to_cart"], button[name="place_order"]').forEach(btn => {
+                        btn.disabled = true;
+                        btn.style.opacity = '0.5';
+                    });
+                } else {
+                    offlineMessage.style.display = 'none';
+                    document.querySelectorAll('button[name="add_to_cart"], button[name="place_order"]').forEach(btn => {
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                    });
+                }
+            }
+            
+            // Initial check and event listeners for online/offline status
+            updateOnlineStatus();
+            window.addEventListener('online', updateOnlineStatus);
+            window.addEventListener('offline', updateOnlineStatus);
+            
+            // Load menu from local storage if offline
+            if (!navigator.onLine) {
+                const cachedMenu = JSON.parse(localStorage.getItem('menuData'));
+                const lang = localStorage.getItem('language');
+                if (cachedMenu) {
+                    Object.keys(cachedMenu).forEach(category => {
+                        const categorySection = document.getElementById('category-' + category);
+                        if (categorySection) {
+                            categorySection.innerHTML = ''; // Clear existing items
+                            cachedMenu[category].forEach(item => {
+                                const itemHtml = `
+                                    <div class="menu-item">
+                                        <div class="menu-item-image">
+                                            <img src="${item.image && '<?php echo UPLOADS_URL; ?>' + item.image || 'assets/images/default-food.jpg'}" alt="${item.name}">
+                                        </div>
+                                        <div class="menu-item-info">
+                                            <div class="menu-item-name">${item.name}</div>
+                                            <div class="menu-item-description">${item.description}</div>
+                                            <div class="menu-item-price">${formatCurrency(item.price)}</div>
+                                            <form method="post" class="menu-item-form">
+                                                <input type="hidden" name="item_id" value="${item.id}">
+                                                <input type="number" name="quantity" value="1" min="1" required>
+                                                <input type="text" name="special_instructions" placeholder="${lang === 'sw' ? 'Maelezo ya Ziada (mfano, bila vitunguu)' : 'Special Instructions (e.g., no onions)'}">
+                                                <button type="submit" name="add_to_cart" class="btn btn-primary" disabled>
+                                                    <i class="fas fa-cart-plus"></i> ${lang === 'sw' ? 'Ongeza' : 'Add'}
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                `;
+                                categorySection.innerHTML += itemHtml;
+                            });
+                        }
+                    });
+                }
+            }
         });
+
+        // JavaScript version of formatCurrency for offline use
+        function formatCurrency(amount) {
+            return amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' TSH';
+        }
     </script>
 </body>
 </html>
