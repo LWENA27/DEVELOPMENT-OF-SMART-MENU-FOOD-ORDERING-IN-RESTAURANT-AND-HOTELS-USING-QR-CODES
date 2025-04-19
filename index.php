@@ -59,7 +59,7 @@ $orderNumber = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
     try {
-        $db->beginTransaction();
+        $db->begin_transaction();
         
         // Check if we have items in the cart
         if (!empty($_POST['items']) && is_array($_POST['items'])) {
@@ -82,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
             $orderStmt = $db->prepare("INSERT INTO orders (table_id, order_number, status, total_amount, notes) VALUES (?, ?, 'pending', 0, ?)");
             $orderStmt->bind_param("iss", $tableId, $orderNumber, $notes);
             $orderStmt->execute();
-            $orderId = $db->getLastId();
+            $orderId = $db->insert_id;
             
             // Process each item
             foreach ($_POST['items'] as $itemId => $qty) {
@@ -105,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
                     // Add item to order
                     $orderItemStmt = $db->prepare("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, special_instructions) 
                                                  VALUES (?, ?, ?, ?, ?)");
-                    $orderItemStmt->bind_param("iiids", $orderId, $itemId, $qty, $unitPrice, $specialInstructions);
+                   $orderItemStmt->bind_param("iiids", $orderId, $itemId, $qty, $unitPrice, $specialInstructions);
                     $orderItemStmt->execute();
                     
                     // Add to total amount
@@ -290,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
         <?php endif; ?>
         
         <footer class="footer">
-            <p>&copy; <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
+            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
             <p><a href="#" id="call-waiter-btn"><i class="fas fa-bell"></i> Call Waiter</a></p>
         </footer>
     </div>
@@ -298,7 +298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['place_order'])) {
     <!-- Call Waiter Modal -->
     <div id="waiter-modal" class="modal">
         <div class="modal-content">
-            <span class="close-modal">&times;</span>
+            <span class="close-modal">×</span>
             <h2><i class="fas fa-bell"></i> Call Waiter</h2>
             <p>How can we help you?</p>
             <form id="waiter-form">

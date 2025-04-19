@@ -3,6 +3,30 @@
 require_once 'includes/config.php';
 require_once 'includes/db.php';
 
+// Define order status constants
+define('ORDER_STATUS_PENDING', 'pending');
+define('ORDER_STATUS_PREPARING', 'preparing');
+define('ORDER_STATUS_READY', 'ready');
+define('ORDER_STATUS_DELIVERED', 'delivered');
+define('ORDER_STATUS_CANCELLED', 'cancelled');
+
+// Define status colors and labels
+const ORDER_STATUS_COLORS = [
+    ORDER_STATUS_PENDING => '#f39c12',    // Orange for pending
+    ORDER_STATUS_PREPARING => '#3498db',  // Blue for preparing
+    ORDER_STATUS_READY => '#2ecc71',      // Green for ready
+    ORDER_STATUS_DELIVERED => '#27ae60',  // Dark green for delivered
+    ORDER_STATUS_CANCELLED => '#e74c3c'   // Red for cancelled
+];
+
+const ORDER_STATUS_LABELS = [
+    ORDER_STATUS_PENDING => 'Pending',
+    ORDER_STATUS_PREPARING => 'Preparing',
+    ORDER_STATUS_READY => 'Ready',
+    ORDER_STATUS_DELIVERED => 'Delivered',
+    ORDER_STATUS_CANCELLED => 'Cancelled'
+];
+
 // Get order number from URL
 $orderNumber = isset($_GET['order']) ? trim($_GET['order']) : '';
 $error = '';
@@ -43,13 +67,17 @@ if (!empty($orderNumber)) {
             $orderItems[] = $item;
         }
     }
-} else {
-    $error = "Please provide an order number to track its status.";
+    // Close the statement, but not the connection yet
+    $stmt->close();
+}
+
+// Helper function for currency format
+function formatCurrency($amount) {
+    return '$' . number_format($amount, 2);
 }
 
 // Get estimated completion time based on preparation times
-function getEstimatedCompletionTime($orderItems, $orderTime) {
-    $db = getDb();
+function getEstimatedCompletionTime($orderItems, $orderTime, $db) {
     $maxPrepTime = 0;
     
     foreach ($orderItems as $item) {
@@ -60,9 +88,10 @@ function getEstimatedCompletionTime($orderItems, $orderTime) {
         $result = $stmt->get_result();
         $menuItem = $result->fetch_assoc();
         
-        if ($menuItem['preparation_time'] > $maxPrepTime) {
+        if ($menuItem && $menuItem['preparation_time'] > $maxPrepTime) {
             $maxPrepTime = $menuItem['preparation_time'];
         }
+        $stmt->close();
     }
     
     // Add buffer time based on number of items
@@ -120,8 +149,15 @@ $estimatedTime = null;
 $statusTimeline = [];
 
 if ($order) {
-    $estimatedTime = getEstimatedCompletionTime($orderItems, $order['created_at']);
+    $estimatedTime = getEstimatedCompletionTime($orderItems, $order['created_at'], $db);
     $statusTimeline = getStatusTimeline($order['status']);
+} elseif (empty($orderNumber)) {
+    $error = "Please provide an order number to track its status.";
+}
+
+// Close the database connection after all operations are complete
+if (isset($db)) {
+    $db->close();
 }
 ?>
 
@@ -457,7 +493,7 @@ if ($order) {
         <?php endif; ?>
         
         <footer class="footer">
-            <p>&copy; <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
+            <p>© <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> - Digital Menu System</p>
         </footer>
     </div>
 
