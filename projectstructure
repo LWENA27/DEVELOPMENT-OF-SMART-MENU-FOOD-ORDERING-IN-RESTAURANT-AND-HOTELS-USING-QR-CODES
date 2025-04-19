@@ -1,20 +1,38 @@
-smart_menu_qr/
-├── admin/
-│   ├── includes/
-│   │   └── sidebar.php
-│   ├── index.php
-│   ├── login.php
-│   ├── logout.php
-│   └── menu.php (new)
-├── includes/
-│   ├── config.php
-│   ├── db.php
-│   └── auth.php
-├── assets/
+C:\xampp\htdocs\smart_menu_qr\
+│
+├── admin/                          # Admin dashboard and management pages
+│   ├── feedback.php                # Displays and manages customer feedback (artifact ID: 7ebcc532-ca72-47c9-be34-6343fcc50866)
+│   ├── index.php                   # Admin dashboard with stats, recent orders, top items, and feedback summary (artifact ID: f6025d12-6606-4a79-885c-0f4a7078f2a0)
+│   ├── login.php                   # Admin login page
+│   ├── logout.php                  # Admin logout page
+│   ├── order-details.php           # View details of a specific order
+│   ├── orders.php                  # List and manage all orders
+│   ├── menu.php                    # Manage menu items
+│   ├── daily-menu.php              # Manage daily menu availability
+│   ├── qr-codes.php                # Generate and manage QR codes for tables
+│   ├── reports.php                 # Generate sales and performance reports
+│   └── includes/
+│       └── sidebar.php             # Sidebar navigation for admin pages
+│
+├── assets/                         # Static assets (CSS, JS, images)
 │   ├── css/
-│   │   └── admin.css
-│   └── js/
-│       └── admin.js
-├── qr-gen/
-│   └── codes/
-└── index.php
+│   │   ├── style.css               # Main styles for customer-facing pages
+│   │   └── admin.css               # Styles for admin dashboard
+│   ├── js/
+│   │   ├── script.js               # Client-side scripts for customer pages
+│   │   └── admin.js                # Client-side scripts for admin pages
+│   └── images/
+│       ├── logo.png                # Restaurant logo
+│       └── default-food.jpg        # Default image for menu items
+│
+├── includes/                       # Shared PHP includes
+│   ├── config.php                  # Configuration constants (e.g., SITE_NAME, DB settings)
+│   ├── db.php                      # Database connection and utility functions
+│   └── auth.php                    # Authentication functions (e.g., isLoggedIn(), isAdmin())
+│
+├── uploads/                        # Directory for uploaded images (e.g., menu item images)
+│   └── [menu_item_images]          # Images for menu items (e.g., garlic_bread.jpg)
+│
+├── index.php                       # Main customer-facing page for menu browsing and ordering (artifact ID: 394f876b-deaa-41db-a9de-cf6c10231669)
+├── status.php                      # Order status tracking page with feedback form (artifact ID: 35e306a7-6867-4544-8d7c-5fe7073c48ec)
+└── [other potential files]          # Placeholder for additional pages (e.g., about.php, contact.php)
